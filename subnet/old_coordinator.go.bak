@@ -1,0 +1,174 @@
+package subnet
+
+import (
+	"fmt"
+	"time"
+)
+
+// SubnetCoordinator orchestrates the interaction between miner and validators
+type SubnetCoordinator struct {
+	SubnetID   string
+	Miner      *Miner
+	Validators []*Validator
+	
+	// Demo data
+	userInputs []string
+}
+
+// NewSubnetCoordinator creates a new subnet coordinator
+func NewSubnetCoordinator(subnetID string) *SubnetCoordinator {
+	coordinator := &SubnetCoordinator{
+		SubnetID: subnetID,
+		Miner:    NewMiner("miner-1", subnetID),
+		Validators: []*Validator{
+			NewValidator("validator-1", subnetID, UserInterfaceValidator),
+			NewValidator("validator-2", subnetID, ConsensusValidator),
+			NewValidator("validator-3", subnetID, ConsensusValidator),
+			NewValidator("validator-4", subnetID, ConsensusValidator),
+		},
+		userInputs: []string{
+			"Analyze market trends for Q4",
+			"Generate summary report for project Alpha",
+			"Create optimization strategy for resource allocation",
+			"Design implementation plan for new features",
+			"Review performance metrics and recommendations",
+			"Develop technical specifications for API integration",
+			"Provide comprehensive analysis of system architecture",
+		},
+	}
+	
+	return coordinator
+}
+
+// RunDemo executes the complete demo scenario
+func (sc *SubnetCoordinator) RunDemo() {
+	fmt.Printf("=== Starting Subnet Demo ===\n")
+	fmt.Printf("Subnet ID: %s\n", sc.SubnetID)
+	fmt.Printf("Miner: %s\n", sc.Miner.ID)
+	fmt.Printf("Validators: ")
+	for _, v := range sc.Validators {
+		fmt.Printf("%s ", v.ID)
+	}
+	fmt.Printf("\n\n")
+	
+	// Process each input according to demo scenario
+	for inputNum := 1; inputNum <= 7; inputNum++ {
+		fmt.Printf("--- Processing Input %d ---\n", inputNum)
+		sc.processInput(inputNum, sc.userInputs[inputNum-1])
+		fmt.Println()
+		time.Sleep(1 * time.Second) // Small delay for readability
+	}
+	
+	// Print final summary
+	sc.printSummary()
+}
+
+// processInput handles a single user input through the complete workflow
+func (sc *SubnetCoordinator) processInput(inputNumber int, input string) {
+	requestID := fmt.Sprintf("req-%s-%d", sc.SubnetID, inputNumber)
+	
+	fmt.Printf("User Input: %s\n", input)
+	
+	// Step 1: Miner processes input
+	minerResponse := sc.Miner.ProcessInput(input, inputNumber, requestID)
+	
+	if minerResponse.OutputType == NeedMoreInfo {
+		// Handle info request scenario
+		sc.handleInfoRequest(inputNumber, input, minerResponse)
+	} else {
+		// Handle normal output scenario
+		sc.handleNormalOutput(inputNumber, minerResponse)
+	}
+}
+
+// handleInfoRequest processes the scenario where miner needs more information
+func (sc *SubnetCoordinator) handleInfoRequest(inputNumber int, originalInput string, minerResponse *MinerResponseMessage) {
+	fmt.Printf("Miner requests more info: %s\n", minerResponse.InfoRequest)
+	
+	// Validator 1 (UI validator) asks user for more info
+	uiValidator := sc.Validators[0]
+	infoRequest := uiValidator.RequestMoreInfo(minerResponse.RequestID, minerResponse.InfoRequest)
+	
+	if infoRequest != nil {
+		fmt.Printf("Validator %s asks user: %s\n", uiValidator.ID, infoRequest.Question)
+		
+		// Simulate user providing additional info
+		var additionalInfo string
+		switch inputNumber {
+		case 3:
+			additionalInfo = "Focus on cost optimization and ROI analysis specifically."
+		case 6:
+			additionalInfo = "Use REST API with JSON payloads, authentication via OAuth 2.0."
+		}
+		
+		fmt.Printf("User provides: %s\n", additionalInfo)
+		
+		// Miner processes additional information
+		finalResponse := sc.Miner.ProcessAdditionalInfo(originalInput, additionalInfo, inputNumber, minerResponse.RequestID)
+		
+		// Continue with normal flow
+		sc.handleNormalOutput(inputNumber, finalResponse)
+	}
+}
+
+// handleNormalOutput processes normal miner output through validator consensus
+func (sc *SubnetCoordinator) handleNormalOutput(inputNumber int, minerResponse *MinerResponseMessage) {
+	fmt.Printf("Miner output: %s\n", minerResponse.Output)
+	
+	// Step 2: All validators vote on output quality
+	votes := make([]*ValidatorVoteMessage, 0, len(sc.Validators))
+	
+	for _, validator := range sc.Validators {
+		vote := validator.VoteOnOutput(minerResponse)
+		if vote != nil {
+			votes = append(votes, vote)
+		}
+	}
+	
+	// Step 3: Check validator consensus
+	consensus := sc.checkConsensus(minerResponse.RequestID)
+	
+	if consensus != nil && consensus.IsAccepted() {
+		fmt.Printf("Validator consensus: ACCEPTED (%.2f acceptance weight)\n", consensus.AcceptVotes)
+		
+		// Step 4: Simulate user feedback
+		userAccepts, userFeedback := sc.Validators[0].SimulateUserInteraction(inputNumber, minerResponse.Output)
+		fmt.Printf("User feedback: %s\n", userFeedback)
+		
+		if userAccepts {
+			fmt.Printf("Final result: OUTPUT DELIVERED TO USER\n")
+		} else {
+			fmt.Printf("Final result: OUTPUT REJECTED BY USER (despite validator acceptance)\n")
+		}
+	} else {
+		fmt.Printf("Validator consensus: REJECTED\n")
+		fmt.Printf("Final result: OUTPUT REJECTED BY VALIDATORS\n")
+	}
+}
+
+// checkConsensus aggregates all validator votes and determines consensus
+func (sc *SubnetCoordinator) checkConsensus(requestID string) *QualityAssessment {
+	// Get consensus from first validator (they all should have same assessment)
+	return sc.Validators[0].GetAssessment(requestID)
+}
+
+// printSummary prints the final state of the subnet
+func (sc *SubnetCoordinator) printSummary() {
+	fmt.Printf("=== Demo Summary ===\n")
+	fmt.Printf("Miner final VLC Clock: %d\n", sc.Miner.GetCurrentClock())
+	
+	fmt.Printf("\nValidator final states:\n")
+	for _, validator := range sc.Validators {
+		fmt.Printf("  %s: Last miner clock = %d\n", validator.ID, validator.GetLastMinerClock())
+	}
+	
+	fmt.Printf("\nProcessed inputs summary:\n")
+	processedInputs := sc.Miner.GetProcessedInputs()
+	for i := 1; i <= 7; i++ {
+		if response, exists := processedInputs[i]; exists {
+			fmt.Printf("  Input %d: Clock=%d, Type=%s\n", i, response.VLCClock, response.OutputType)
+		}
+	}
+	
+	fmt.Printf("\nDemo completed successfully!\n")
+}

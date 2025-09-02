@@ -1,0 +1,152 @@
+package subnet
+
+import (
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/yourorg/p2p-framework/vlc"
+)
+
+// Miner represents a single miner node in the subnet
+type Miner struct {
+	ID       string
+	SubnetID string
+	VLCClock *vlc.Clock
+	mu       sync.RWMutex
+
+	// Demo scenario data
+	processedInputs map[int]*MinerResponseMessage
+}
+
+// NewMiner creates a new miner instance
+func NewMiner(id, subnetID string) *Miner {
+	return &Miner{
+		ID:              id,
+		SubnetID:        subnetID,
+		VLCClock:        vlc.New(), // Initialize VLC clock
+		processedInputs: make(map[int]*MinerResponseMessage),
+	}
+}
+
+// ProcessInput processes user input and returns appropriate response
+func (m *Miner) ProcessInput(input string, inputNumber int, requestID string) *MinerResponseMessage {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Increment VLC clock for each processing (miner ID = 1)
+	m.VLCClock.Inc(1)
+
+	response := &MinerResponseMessage{
+		SubnetMessage: SubnetMessage{
+			SubnetID:  m.SubnetID,
+			RequestID: requestID,
+			Type:      MinerResponseType,
+			Sender:    m.ID,
+			Timestamp: time.Now().Unix(),
+		},
+		VLCClock:    m.VLCClock,
+		InputNumber: inputNumber,
+	}
+
+	// Demo scenario logic based on your specifications
+	switch inputNumber {
+	case 3:
+		// Input 3: Miner requests more info → normal flow
+		response.OutputType = NeedMoreInfo
+		response.InfoRequest = "Could you please provide more context about what specific aspect you'd like me to focus on?"
+		fmt.Printf("Miner: Input %d - Requesting more information\n", inputNumber)
+
+	case 6:
+		// Input 6: Miner requests more info → will eventually be rejected by user
+		response.OutputType = NeedMoreInfo
+		response.InfoRequest = "I need clarification on the technical requirements. Could you specify the exact parameters?"
+		fmt.Printf("Miner: Input %d - Requesting more information (will be rejected later)\n", inputNumber)
+
+	default:
+		// Normal processing for inputs 1, 2, 4, 5, 7
+		response.OutputType = OutputReady
+		response.Output = m.generateOutput(input, inputNumber)
+		fmt.Printf("Miner: Input %d - Generated output: %s\n", inputNumber, response.Output)
+	}
+
+	// Store the response for tracking
+	m.processedInputs[inputNumber] = response
+
+	return response
+}
+
+// ProcessAdditionalInfo processes additional information provided by user
+func (m *Miner) ProcessAdditionalInfo(originalInput string, additionalInfo string, inputNumber int, requestID string) *MinerResponseMessage {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Increment VLC clock for additional processing (miner ID = 1)
+	m.VLCClock.Inc(1)
+
+	response := &MinerResponseMessage{
+		SubnetMessage: SubnetMessage{
+			SubnetID:  m.SubnetID,
+			RequestID: requestID,
+			Type:      MinerResponseType,
+			Sender:    m.ID,
+			Timestamp: time.Now().Unix(),
+		},
+		OutputType:  OutputReady,
+		VLCClock:    m.VLCClock,
+		InputNumber: inputNumber,
+	}
+
+	// Generate output based on original input + additional info
+	combinedInput := fmt.Sprintf("%s [Additional context: %s]", originalInput, additionalInfo)
+	response.Output = m.generateOutput(combinedInput, inputNumber)
+
+	fmt.Printf("Miner: Input %d - Generated output with additional info: %s\n", inputNumber, response.Output)
+
+	// Update stored response
+	m.processedInputs[inputNumber] = response
+
+	return response
+}
+
+// generateOutput simulates AI processing and generates output
+func (m *Miner) generateOutput(input string, inputNumber int) string {
+	// Simulate different types of outputs based on input number
+	switch inputNumber {
+	case 1:
+		return "Analyzed your request and generated comprehensive solution A"
+	case 2:
+		return "Processed data and created detailed response B"
+	case 3:
+		return "With additional context, here's refined solution C"
+	case 4:
+		return "Generated output D that will be rejected by user"
+	case 5:
+		return "Standard processing result E"
+	case 6:
+		return "Enhanced output F with clarifications (will be rejected)"
+	case 7:
+		return "Final comprehensive solution G"
+	default:
+		return fmt.Sprintf("Processed input: %s", input)
+	}
+}
+
+// GetCurrentClock returns the current VLC clock value
+func (m *Miner) GetCurrentClock() *vlc.Clock {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.VLCClock.Copy()
+}
+
+// GetProcessedInputs returns all processed inputs for debugging
+func (m *Miner) GetProcessedInputs() map[int]*MinerResponseMessage {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	result := make(map[int]*MinerResponseMessage)
+	for k, v := range m.processedInputs {
+		result[k] = v
+	}
+	return result
+}

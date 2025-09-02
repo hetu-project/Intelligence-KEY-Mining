@@ -1,0 +1,184 @@
+package subnet
+
+import (
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/yourorg/p2p-framework/vlc"
+)
+
+// ValidatorRole defines the role of validator in the subnet
+type ValidatorRole int
+
+const (
+	UserInterfaceValidator ValidatorRole = iota // Validator 1 - handles user communication
+	ConsensusValidator                          // Validators 2-4 - only vote on quality
+)
+
+// Validator represents a validator node in the subnet
+type Validator struct {
+	ID             string
+	SubnetID       string
+	Role           ValidatorRole
+	Weight         float64 // 0.25 for each validator
+	MinerClock     *vlc.Clock // VLC clock tracking miner's state
+	mu             sync.RWMutex
+
+	// Quality assessments tracked by request ID
+	assessments map[string]*QualityAssessment
+}
+
+// NewValidator creates a new validator instance
+func NewValidator(id, subnetID string, role ValidatorRole) *Validator {
+	return &Validator{
+		ID:          id,
+		SubnetID:    subnetID,
+		Role:        role,
+		Weight:      0.25, // Equal weights for 4 validators
+		MinerClock:  vlc.New(), // Initialize VLC clock
+		assessments: make(map[string]*QualityAssessment),
+	}
+}
+
+// ValidateSequence checks if the miner's clock follows proper sequence
+func (v *Validator) ValidateSequence(minerClock uint64) bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	expected := v.LastMinerClock + 1
+	if minerClock == expected {
+		v.LastMinerClock = minerClock
+		fmt.Printf("Validator %s: Clock sequence validated - %d\n", v.ID, minerClock)
+		return true
+	}
+
+	fmt.Printf("Validator %s: Clock sequence error - expected %d, got %d\n",
+		v.ID, expected, minerClock)
+	return false
+}
+
+// VoteOnOutput evaluates miner output and submits vote
+func (v *Validator) VoteOnOutput(response *MinerResponseMessage) *ValidatorVoteMessage {
+	// Only vote if sequence is valid
+	if !v.ValidateSequence(response.VLCClock) {
+		return nil
+	}
+
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	// Ensure assessment exists for this request
+	if _, exists := v.assessments[response.RequestID]; !exists {
+		v.assessments[response.RequestID] = &QualityAssessment{
+			RequestID: response.RequestID,
+		}
+	}
+
+	vote := &ValidatorVoteMessage{
+		SubnetMessage: SubnetMessage{
+			SubnetID:  v.SubnetID,
+			RequestID: response.RequestID,
+			Type:      ValidatorVoteType,
+			Sender:    v.ID,
+			Timestamp: time.Now().Unix(),
+		},
+		ValidatorID:    v.ID,
+		Weight:         v.Weight,
+		LastMinerClock: v.LastMinerClock,
+	}
+
+	// Demo quality assessment logic
+	quality, accept := v.assessQuality(response)
+	vote.Quality = quality
+	vote.Accept = accept
+
+	// Add vote to assessment
+	assessment := v.assessments[response.RequestID]
+	assessment.AddVote(v.Weight, accept)
+
+	fmt.Printf("Validator %s: Voted on Request %s - Accept: %t, Quality: %.2f\n",
+		v.ID, response.RequestID, accept, quality)
+
+	return vote
+}
+
+// assessQuality implements demo quality assessment logic
+func (v *Validator) assessQuality(response *MinerResponseMessage) (float64, bool) {
+	// For demo purposes, use some hardcoded quality logic
+	inputNum := response.InputNumber
+
+	switch inputNum {
+	case 1, 2, 5, 7:
+		// These should be accepted by validators
+		return 0.85, true
+	case 3, 6:
+		// These will be initially accepted by validators but rejected by user later
+		return 0.75, true
+	case 4:
+		// This should be rejected by validators as well
+		return 0.45, false
+	default:
+		return 0.60, true
+	}
+}
+
+// RequestMoreInfo creates an info request message (only for UserInterface validators)
+func (v *Validator) RequestMoreInfo(requestID, question string) *InfoRequestMessage {
+	if v.Role != UserInterfaceValidator {
+		return nil // Only UI validator can request more info
+	}
+
+	return &InfoRequestMessage{
+		SubnetMessage: SubnetMessage{
+			SubnetID:  v.SubnetID,
+			RequestID: requestID,
+			Type:      InfoRequestType,
+			Sender:    v.ID,
+			Timestamp: time.Now().Unix(),
+		},
+		Question: question,
+	}
+}
+
+// GetAssessment returns the current quality assessment for a request
+func (v *Validator) GetAssessment(requestID string) *QualityAssessment {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	if assessment, exists := v.assessments[requestID]; exists {
+		// Return a copy to avoid race conditions
+		return &QualityAssessment{
+			RequestID:   assessment.RequestID,
+			TotalWeight: assessment.TotalWeight,
+			AcceptVotes: assessment.AcceptVotes,
+			RejectVotes: assessment.RejectVotes,
+			VoteCount:   assessment.VoteCount,
+			Consensus:   assessment.Consensus,
+		}
+	}
+	return nil
+}
+
+// GetLastMinerClock returns the last validated miner clock
+func (v *Validator) GetLastMinerClock() uint64 {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.LastMinerClock
+}
+
+// SimulateUserInteraction simulates user feedback for demo purposes
+func (v *Validator) SimulateUserInteraction(inputNumber int, output string) (bool, string) {
+	// Demo user rejection logic based on your specifications
+	switch inputNumber {
+	case 4:
+		// User rejects output
+		return false, "I don't think this output addresses my needs correctly."
+	case 6:
+		// User rejects output even after additional info was provided
+		return false, "This still doesn't meet my requirements despite the additional context."
+	default:
+		// User accepts output
+		return true, "This looks good, thank you!"
+	}
+}
