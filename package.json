@@ -1,0 +1,20 @@
+{
+  "name": "intelligence-key-mining-tests",
+  "version": "1.0.0",
+  "description": "JavaScript tests for Intelligence Money (KEY) PoCW mining system",
+  "main": "tests/test-enhanced-pocw.js",
+  "scripts": {
+    "test:enhanced": "node tests/test-enhanced-pocw.js",
+    "test:old": "node tests/test-pocw.js", 
+    "test:bash": "cd tests && ./test-enhanced-pocw.sh",
+    "test:js-fresh": "tests/run-js-test.sh",
+    "deploy": "./fresh-deploy-and-test.sh"
+  },
+  "dependencies": {
+    "ethers": "^6.8.1"
+  },
+  "devDependencies": {},
+  "keywords": ["blockchain", "ethereum", "pocw", "ai", "mining", "key", "hetu"],
+  "author": "PoCW Development Team",
+  "license": "MIT"
+}

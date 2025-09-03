@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PoCW Contract Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            transition: transform 0.3s;
+        }
+        
+        .card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .card-title {
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            color: #333;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+        
+        .status {
+            display: flex;
+            align-items: center;
+            margin: 10px 0;
+            padding: 10px;
+            background: #f7f9fc;
+            border-radius: 8px;
+        }
+        
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+        
+        .status-dot.connected { background: #10b981; }
+        .status-dot.deployed { background: #3b82f6; }
+        .status-dot.error { background: #ef4444; }
+        .status-dot.pending { background: #f59e0b; }
+        
+        .address {
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            background: #f1f5f9;
+            padding: 8px 12px;
+            border-radius: 6px;
+            word-break: break-all;
+            margin: 5px 0;
+        }
+        
+        .balance {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #059669;
+            margin: 5px 0;
+        }
+        
+        .account-item {
+            padding: 12px;
+            margin: 8px 0;
+            background: #f9fafb;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .account-label {
+            font-weight: 600;
+            color: #4b5563;
+            margin-bottom: 5px;
+        }
+        
+        .button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background 0.3s;
+            margin-top: 15px;
+            width: 100%;
+        }
+        
+        .button:hover {
+            background: #5a67d8;
+        }
+        
+        .button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+        
+        .error {
+            color: #ef4444;
+            background: #fee2e2;
+            padding: 10px;
+            border-radius: 6px;
+            margin: 10px 0;
+        }
+        
+        .success {
+            color: #059669;
+            background: #d1fae5;
+            padding: 10px;
+            border-radius: 6px;
+            margin: 10px 0;
+        }
+        
+        .loading {
+            text-align: center;
+            color: #6b7280;
+            padding: 20px;
+        }
+        
+        .contract-status {
+            display: grid;
+            gap: 10px;
+        }
+        
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px;
+            background: #f9fafb;
+            border-radius: 6px;
+        }
+        
+        .metric-label {
+            color: #6b7280;
+        }
+        
+        .metric-value {
+            font-weight: bold;
+            color: #111827;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔷 PoCW Contract Dashboard</h1>
+        
+        <div class="dashboard">
+            <!-- Connection Status -->
+            <div class="card">
+                <h2 class="card-title">🌐 Network Status</h2>
+                <div id="network-status">
+                    <div class="loading">Connecting...</div>
+                </div>
+                <button class="button" onclick="connectNetwork()">Refresh Connection</button>
+            </div>
+            
+            <!-- Smart Contracts -->
+            <div class="card">
+                <h2 class="card-title">📜 Smart Contracts</h2>
+                <div id="contracts-status">
+                    <div class="loading">Loading contracts...</div>
+                </div>
+                <button class="button" onclick="verifyContracts()">Verify Contracts</button>
+            </div>
+            
+            <!-- Account Balances -->
+            <div class="card">
+                <h2 class="card-title">💰 Account Balances</h2>
+                <div id="accounts-status">
+                    <div class="loading">Loading accounts...</div>
+                </div>
+                <button class="button" onclick="refreshBalances()">Refresh Balances</button>
+            </div>
+            
+            <!-- Token Information -->
+            <div class="card">
+                <h2 class="card-title">🪙 Token Status</h2>
+                <div id="token-status">
+                    <div class="loading">Loading token info...</div>
+                </div>
+                <button class="button" onclick="checkTokens()">Check Tokens</button>
+            </div>
+            
+            <!-- Subnet Registration -->
+            <div class="card">
+                <h2 class="card-title">🔗 Subnet Registry</h2>
+                <div id="subnet-status">
+                    <div class="loading">Checking subnet...</div>
+                </div>
+                <button class="button" onclick="checkSubnet()">Check Subnet</button>
+            </div>
+            
+            <!-- Actions -->
+            <div class="card">
+                <h2 class="card-title">🎯 Quick Actions</h2>
+                <div id="actions">
+                    <button class="button" onclick="distributeHETU()">Distribute HETU to Accounts</button>
+                    <button class="button" onclick="registerSubnet()">Register Test Subnet</button>
+                    <button class="button" onclick="simulateEpoch()">Simulate Epoch Submission</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let provider;
+        let signer;
+        let contracts = {};
+        let accounts = {};
+        
+        // Contract addresses (will be loaded from contract_addresses.json)
+        let contractAddresses = {
+            hetuToken: '',
+            keyToken: '',
+            subnetRegistry: '',
+            pocwVerifier: ''
+        };
+        
+        // Contract ABIs (simplified)
+        const HETU_ABI = [
+            "function balanceOf(address) view returns (uint256)",
+            "function totalSupply() view returns (uint256)",
+            "function transfer(address to, uint256 amount) returns (bool)",
+            "function approve(address spender, uint256 amount) returns (bool)"
+        ];
+        
+        const KEY_ABI = [
+            "function balanceOf(address) view returns (uint256)",
+            "function totalSupply() view returns (uint256)",
+            "function totalMined() view returns (uint256)",
+            "function remainingSupply() view returns (uint256)",
+            "function MAX_SUPPLY() view returns (uint256)"
+        ];
+        
+        const REGISTRY_ABI = [
+            "function subnets(string) view returns (string, address, address[4], uint256, uint256, bool, uint256)",
+            "function registerSubnet(string, address, address[4])",
+            "function isSubnetActive(string) view returns (bool)"
+        ];
+        
+        const VERIFIER_ABI = [
+            "function subnetEpochs(string) view returns (uint256)",
+            "function MINER_REWARD_PER_ROUND() view returns (uint256)",
+            "function VALIDATOR_REWARD_PER_ROUND() view returns (uint256)"
+        ];
+        
+        async function init() {
+            try {
+                // Connect to local Anvil
+                provider = new ethers.providers.JsonRpcProvider('http://localhost:8545');
+                
+                // Get the first account as signer
+                const accounts = await provider.listAccounts();
+                if (accounts.length > 0) {
+                    signer = provider.getSigner(accounts[0]);
+                }
+                
+                // Try to load contract addresses
+                await loadContractAddresses();
+                
+                // Initialize everything
+                await connectNetwork();
+                await verifyContracts();
+                await refreshBalances();
+                await checkTokens();
+                await checkSubnet();
+                
+            } catch (error) {
+                console.error('Initialization error:', error);
+            }
+        }
+        
+        async function loadContractAddresses() {
+            try {
+                const response = await fetch('contract_addresses.json');
+                if (response.ok) {
+                    const data = await response.json();
+                    contractAddresses = data;
+                    accounts = data.accounts;
+                }
+            } catch (error) {
+                console.log('Could not load contract addresses, using defaults');
+            }
+        }
+        
+        async function connectNetwork() {
+            const statusDiv = document.getElementById('network-status');
+            try {
+                const network = await provider.getNetwork();
+                const blockNumber = await provider.getBlockNumber();
+                const accounts = await provider.listAccounts();
+                
+                statusDiv.innerHTML = `
+                    <div class="status">
+                        <div class="status-dot connected"></div>
+                        <span>Connected to Anvil</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Chain ID:</span>
+                        <span class="metric-value">${network.chainId}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Block Number:</span>
+                        <span class="metric-value">${blockNumber}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">RPC URL:</span>
+                        <span class="metric-value">http://localhost:8545</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Accounts Available:</span>
+                        <span class="metric-value">${accounts.length}</span>
+                    </div>
+                `;
+            } catch (error) {
+                statusDiv.innerHTML = `
+                    <div class="status">
+                        <div class="status-dot error"></div>
+                        <span>Not Connected</span>
+                    </div>
+                    <div class="error">Error: ${error.message}</div>
+                    <p style="margin-top: 10px">Make sure Anvil is running on port 8545</p>
+                `;
+            }
+        }
+        
+        async function verifyContracts() {
+            const statusDiv = document.getElementById('contracts-status');
+            let html = '<div class="contract-status">';
+            
+            for (const [name, address] of Object.entries(contractAddresses)) {
+                if (name === 'accounts') continue;
+                
+                try {
+                    const code = await provider.getCode(address);
+                    const isDeployed = code && code !== '0x';
+                    
+                    html += `
+                        <div class="status">
+                            <div class="status-dot ${isDeployed ? 'deployed' : 'error'}"></div>
+                            <span>${name}</span>
+                        </div>
+                        <div class="address">${address || 'Not deployed'}</div>
+                    `;
+                    
+                    if (isDeployed) {
+                        // Initialize contract instances
+                        if (name === 'hetuToken') {
+                            contracts.hetu = new ethers.Contract(address, HETU_ABI, signer);
+                        } else if (name === 'keyToken') {
+                            contracts.key = new ethers.Contract(address, KEY_ABI, signer);
+                        } else if (name === 'subnetRegistry') {
+                            contracts.registry = new ethers.Contract(address, REGISTRY_ABI, signer);
+                        } else if (name === 'pocwVerifier') {
+                            contracts.verifier = new ethers.Contract(address, VERIFIER_ABI, signer);
+                        }
+                    }
+                } catch (error) {
+                    html += `
+                        <div class="status">
+                            <div class="status-dot error"></div>
+                            <span>${name}</span>
+                        </div>
+                        <div class="error">Error checking contract</div>
+                    `;
+                }
+            }
+            
+            html += '</div>';
+            statusDiv.innerHTML = html;
+        }
+        
+        async function refreshBalances() {
+            const statusDiv = document.getElementById('accounts-status');
+            let html = '';
+            
+            const accountList = [
+                { label: 'Deployer', address: accounts.deployer },
+                { label: 'Miner', address: accounts.miner },
+                { label: 'Validator-1', address: accounts.validator1 },
+                { label: 'Validator-2', address: accounts.validator2 },
+                { label: 'Validator-3', address: accounts.validator3 },
+                { label: 'Validator-4', address: accounts.validator4 }
+            ];
+            
+            for (const account of accountList) {
+                try {
+                    const balance = await provider.getBalance(account.address);
+                    const ethBalance = ethers.utils.formatEther(balance);
+                    
+                    let hetuBalance = '0';
+                    let keyBalance = '0';
+                    
+                    if (contracts.hetu) {
+                        const hetu = await contracts.hetu.balanceOf(account.address);
+                        hetuBalance = ethers.utils.formatEther(hetu);
+                    }
+                    
+                    if (contracts.key) {
+                        const key = await contracts.key.balanceOf(account.address);
+                        keyBalance = ethers.utils.formatEther(key);
+                    }
+                    
+                    html += `
+                        <div class="account-item">
+                            <div class="account-label">${account.label}</div>
+                            <div class="address">${account.address}</div>
+                            <div class="balance">ETH: ${parseFloat(ethBalance).toFixed(2)}</div>
+                            <div class="balance">HETU: ${parseFloat(hetuBalance).toFixed(2)}</div>
+                            <div class="balance">KEY: ${parseFloat(keyBalance).toFixed(2)}</div>
+                        </div>
+                    `;
+                } catch (error) {
+                    html += `
+                        <div class="account-item">
+                            <div class="account-label">${account.label}</div>
+                            <div class="error">Error loading balance</div>
+                        </div>
+                    `;
+                }
+            }
+            
+            statusDiv.innerHTML = html || '<div class="error">No accounts configured</div>';
+        }
+        
+        async function checkTokens() {
+            const statusDiv = document.getElementById('token-status');
+            let html = '';
+            
+            try {
+                if (contracts.hetu) {
+                    const totalSupply = await contracts.hetu.totalSupply();
+                    html += `
+                        <h3 style="margin-bottom: 10px">HETU Token</h3>
+                        <div class="metric">
+                            <span class="metric-label">Total Supply:</span>
+                            <span class="metric-value">${ethers.utils.formatEther(totalSupply)} HETU</span>
+                        </div>
+                    `;
+                }
+                
+                if (contracts.key) {
+                    const maxSupply = await contracts.key.MAX_SUPPLY();
+                    const totalSupply = await contracts.key.totalSupply();
+                    const remaining = await contracts.key.remainingSupply();
+                    
+                    html += `
+                        <h3 style="margin: 20px 0 10px">KEY Token</h3>
+                        <div class="metric">
+                            <span class="metric-label">Max Supply:</span>
+                            <span class="metric-value">${ethers.utils.formatEther(maxSupply)} KEY</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Current Supply:</span>
+                            <span class="metric-value">${ethers.utils.formatEther(totalSupply)} KEY</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Remaining:</span>
+                            <span class="metric-value">${ethers.utils.formatEther(remaining)} KEY</span>
+                        </div>
+                    `;
+                }
+                
+                if (contracts.verifier) {
+                    const minerReward = await contracts.verifier.MINER_REWARD_PER_ROUND();
+                    const validatorReward = await contracts.verifier.VALIDATOR_REWARD_PER_ROUND();
+                    
+                    html += `
+                        <h3 style="margin: 20px 0 10px">Mining Rates</h3>
+                        <div class="metric">
+                            <span class="metric-label">Miner per round:</span>
+                            <span class="metric-value">${ethers.utils.formatEther(minerReward)} KEY</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Validator per round:</span>
+                            <span class="metric-value">${ethers.utils.formatEther(validatorReward)} KEY</span>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                html = `<div class="error">Error loading token info: ${error.message}</div>`;
+            }
+            
+            statusDiv.innerHTML = html || '<div class="error">No token contracts found</div>';
+        }
+        
+        async function checkSubnet() {
+            const statusDiv = document.getElementById('subnet-status');
+            
+            try {
+                if (!contracts.registry) {
+                    statusDiv.innerHTML = '<div class="error">Registry contract not deployed</div>';
+                    return;
+                }
+                
+                const isActive = await contracts.registry.isSubnetActive('subnet-001');
+                
+                if (isActive) {
+                    const subnet = await contracts.registry.subnets('subnet-001');
+                    statusDiv.innerHTML = `
+                        <div class="status">
+                            <div class="status-dot deployed"></div>
+                            <span>Subnet-001 Active</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Miner:</span>
+                            <span class="metric-value">${subnet[1].substring(0, 10)}...</span>
+                        </div>
+                    `;
+                } else {
+                    statusDiv.innerHTML = `
+                        <div class="status">
+                            <div class="status-dot pending"></div>
+                            <span>No subnet registered</span>
+                        </div>
+                        <p style="margin-top: 10px">Click "Register Test Subnet" to register</p>
+                    `;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `<div class="error">Error checking subnet: ${error.message}</div>`;
+            }
+        }
+        
+        async function distributeHETU() {
+            try {
+                if (!contracts.hetu) {
+                    alert('HETU contract not deployed');
+                    return;
+                }
+                
+                const amount = ethers.utils.parseEther('1000');
+                
+                // Transfer HETU to all accounts
+                const recipients = [
+                    accounts.miner,
+                    accounts.validator1,
+                    accounts.validator2,
+                    accounts.validator3,
+                    accounts.validator4
+                ];
+                
+                for (const recipient of recipients) {
+                    const tx = await contracts.hetu.transfer(recipient, amount);
+                    await tx.wait();
+                }
+                
+                alert('HETU distributed successfully!');
+                await refreshBalances();
+                
+            } catch (error) {
+                alert('Error distributing HETU: ' + error.message);
+            }
+        }
+        
+        async function registerSubnet() {
+            alert('Subnet registration requires all contracts to be deployed. Please complete deployment first.');
+        }
+        
+        async function simulateEpoch() {
+            alert('Epoch simulation requires subnet registration. Please register a subnet first.');
+        }
+        
+        // Initialize on page load
+        window.addEventListener('load', init);
+        
+        // Auto-refresh every 5 seconds
+        setInterval(async () => {
+            await connectNetwork();
+            await refreshBalances();
+        }, 5000);
+    </script>
+</body>
+</html>

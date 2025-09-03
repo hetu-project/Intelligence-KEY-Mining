@@ -44,6 +44,41 @@ else
     echo "📝 No dgraph-standalone container found"
 fi
 
+# Stop Anvil blockchain (if started from deploy.sh)
+echo ""
+echo "🔷 Cleaning up Anvil blockchain..."
+
+# Check for deploy.sh Anvil process
+if [ -f "anvil-deploy.pid" ]; then
+    ANVIL_PID=$(cat anvil-deploy.pid)
+    if kill -0 $ANVIL_PID 2>/dev/null; then
+        echo "🛑 Stopping Anvil (PID: $ANVIL_PID)..."
+        kill $ANVIL_PID
+        echo "✅ Anvil stopped"
+    else
+        echo "📦 Anvil already stopped"
+    fi
+    rm anvil-deploy.pid
+else
+    # Try to find any Anvil process by port
+    ANVIL_PID=$(lsof -ti:8545 2>/dev/null)
+    if [ ! -z "$ANVIL_PID" ]; then
+        echo "🛑 Stopping Anvil process on port 8545..."
+        kill $ANVIL_PID 2>/dev/null || true
+        echo "✅ Anvil stopped"
+    else
+        echo "📝 No Anvil process found"
+    fi
+fi
+
+# Clean up blockchain files
+for file in anvil-deploy.log contract_addresses.json; do
+    if [ -f "$file" ]; then
+        rm "$file"
+        echo "✅ Cleaned up: $file"
+    fi
+done
+
 # Clean up any dangling volumes (optional)
 echo ""
 echo "🧹 Cleaning up unused Docker resources..."

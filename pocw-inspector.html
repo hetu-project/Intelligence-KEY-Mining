@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PoCW Blockchain Inspector</title>
+    <style>
+        body { font-family: monospace; margin: 20px; background: #1a1a1a; color: #00ff00; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .section { margin: 20px 0; padding: 15px; border: 1px solid #333; background: #222; }
+        .btn { padding: 8px 16px; background: #333; color: #00ff00; border: 1px solid #555; cursor: pointer; margin: 5px; }
+        .btn:hover { background: #444; }
+        input, select { padding: 8px; background: #333; color: #00ff00; border: 1px solid #555; margin: 5px; }
+        .output { background: #111; padding: 15px; border: 1px solid #333; margin: 10px 0; max-height: 400px; overflow-y: auto; }
+        .highlight { color: #ffff00; }
+        .error { color: #ff0000; }
+        .success { color: #00ff00; }
+        h1, h2 { color: #00ffff; }
+        .tx-hash { color: #ff6b6b; word-break: break-all; }
+        .address { color: #4ecdc4; word-break: break-all; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 PoCW Blockchain Inspector</h1>
+        
+        <div class="section">
+            <h2>Network Status</h2>
+            <button class="btn" onclick="checkNetwork()">Check Network</button>
+            <button class="btn" onclick="getLatestBlock()">Get Latest Block</button>
+            <div id="network-status" class="output">Click "Check Network" to see status...</div>
+        </div>
+
+        <div class="section">
+            <h2>Block Inspector</h2>
+            <input type="number" id="blockNumber" placeholder="Block number (or leave empty for latest)" style="width: 200px;">
+            <button class="btn" onclick="getBlock()">Get Block Details</button>
+            <div id="block-output" class="output">Enter block number and click "Get Block Details"...</div>
+        </div>
+
+        <div class="section">
+            <h2>Transaction Inspector</h2>
+            <input type="text" id="txHash" placeholder="Transaction hash" style="width: 500px;">
+            <button class="btn" onclick="getTransaction()">Get Transaction</button>
+            <div id="tx-output" class="output">Enter transaction hash and click "Get Transaction"...</div>
+        </div>
+
+        <div class="section">
+            <h2>Contract Inspector</h2>
+            <select id="contractSelect">
+                <option value="0x5FbDB2315678afecb367f032d93F642f64180aa3">HETU Token</option>
+                <option value="0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512">Intelligence Token (KEY)</option>
+                <option value="0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0">PoCW Mainnet</option>
+            </select>
+            <button class="btn" onclick="getContractInfo()">Get Contract Info</button>
+            <div id="contract-output" class="output">Select contract and click "Get Contract Info"...</div>
+        </div>
+
+        <div class="section">
+            <h2>Account Inspector</h2>
+            <input type="text" id="accountAddress" placeholder="Enter address (miner, validator, etc.)" style="width: 400px;">
+            <button class="btn" onclick="getAccountInfo()">Get Account Info</button>
+            <div id="account-output" class="output">Enter address and click "Get Account Info"...</div>
+        </div>
+
+        <div class="section">
+            <h2>Transaction Decoder</h2>
+            <input type="text" id="decodeTxHash" placeholder="Transaction hash to decode" style="width: 500px;">
+            <button class="btn" onclick="decodeTransaction()">Decode Transaction</button>
+            <div id="decode-output" class="output">Enter transaction hash to decode contract calls...</div>
+        </div>
+
+        <div class="section">
+            <h2>Recent Transactions</h2>
+            <button class="btn" onclick="getRecentTransactions()">Get Last 10 Transactions</button>
+            <div id="recent-tx-output" class="output">Click "Get Last 10 Transactions"...</div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/ethers@6.15.0/dist/ethers.umd.min.js"></script>
+    <script>
+        const provider = new ethers.JsonRpcProvider("http://localhost:8545");
+        
+        async function checkNetwork() {
+            try {
+                const network = await provider.getNetwork();
+                const blockNumber = await provider.getBlockNumber();
+                const balance = await provider.getBalance("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
+                
+                document.getElementById('network-status').innerHTML = `
+                    <div class="success">✅ Connected to Hardhat Network</div>
+                    <div><span class="highlight">Chain ID:</span> ${network.chainId}</div>
+                    <div><span class="highlight">Latest Block:</span> ${blockNumber}</div>
+                    <div><span class="highlight">Deployer Balance:</span> ${ethers.formatEther(balance)} ETH</div>
+                    <div><span class="highlight">Network:</span> ${network.name}</div>
+                `;
+            } catch (error) {
+                document.getElementById('network-status').innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+            }
+        }
+
+        async function getLatestBlock() {
+            try {
+                const blockNumber = await provider.getBlockNumber();
+                const block = await provider.getBlock(blockNumber);
+                displayBlock(block);
+            } catch (error) {
+                document.getElementById('network-status').innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+            }
+        }
+
+        async function getBlock() {
+            try {
+                const blockNum = document.getElementById('blockNumber').value;
+                const blockNumber = blockNum ? parseInt(blockNum) : await provider.getBlockNumber();
+                const block = await provider.getBlock(blockNumber);
+                displayBlock(block);
+            } catch (error) {
+                document.getElementById('block-output').innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+            }
+        }
+
+        function displayBlock(block) {
+            const output = `
+                <div class="success">📦 Block #${block.number}</div>
+                <div><span class="highlight">Hash:</span> <span class="tx-hash">${block.hash}</span></div>
+                <div><span class="highlight">Parent Hash:</span> <span class="tx-hash">${block.parentHash}</span></div>
+                <div><span class="highlight">Timestamp:</span> ${new Date(block.timestamp * 1000).toLocaleString()}</div>
+                <div><span class="highlight">Gas Used:</span> ${block.gasUsed ? block.gasUsed.toString() : 'N/A'}</div>
+                <div><span class="highlight">Gas Limit:</span> ${block.gasLimit ? block.gasLimit.toString() : 'N/A'}</div>
+                <div><span class="highlight">Transactions:</span> ${block.transactions.length}</div>
+                <div><span class="highlight">Miner:</span> <span class="address">${block.miner}</span></div>
+                ${block.transactions.length > 0 ? `
+                    <div style="margin-top: 15px;"><span class="highlight">Transaction Hashes:</span></div>
+                    ${block.transactions.map(tx => `<div style="margin-left: 20px;"><span class="tx-hash">${tx}</span></div>`).join('')}
+                ` : ''}
+            `;
+            document.getElementById('block-output').innerHTML = output;
+        }
+
+        async function getTransaction() {
+            try {
+                const txHash = document.getElementById('txHash').value.trim();
+                if (!txHash) {
+                    document.getElementById('tx-output').innerHTML = '<div class="error">❌ Please enter transaction hash</div>';
+                    return;
+                }
+                
+                const tx = await provider.getTransaction(txHash);
+                const receipt = await provider.getTransactionReceipt(txHash);
+                
+                const output = `
+                    <div class="success">📄 Transaction Details</div>
+                    <div><span class="highlight">Hash:</span> <span class="tx-hash">${tx.hash}</span></div>
+                    <div><span class="highlight">Block:</span> ${tx.blockNumber}</div>
+                    <div><span class="highlight">From:</span> <span class="address">${tx.from}</span></div>
+                    <div><span class="highlight">To:</span> <span class="address">${tx.to}</span></div>
+                    <div><span class="highlight">Value:</span> ${ethers.formatEther(tx.value)} ETH</div>
+                    <div><span class="highlight">Gas Used:</span> ${receipt.gasUsed.toString()}</div>
+                    <div><span class="highlight">Gas Price:</span> ${tx.gasPrice ? ethers.formatUnits(tx.gasPrice, "gwei") + " gwei" : 'N/A'}</div>
+                    <div><span class="highlight">Status:</span> ${receipt.status === 1 ? '<span class="success">Success</span>' : '<span class="error">Failed</span>'}</div>
+                    <div><span class="highlight">Nonce:</span> ${tx.nonce}</div>
+                    ${tx.data && tx.data !== '0x' ? `
+                        <div style="margin-top: 15px;"><span class="highlight">Input Data:</span></div>
+                        <div style="word-break: break-all; font-size: 10px; background: #0a0a0a; padding: 10px;">${tx.data}</div>
+                    ` : ''}
+                    ${receipt.logs.length > 0 ? `
+                        <div style="margin-top: 15px;"><span class="highlight">Events (${receipt.logs.length}):</span></div>
+                        ${receipt.logs.map((log, i) => `
+                            <div style="margin-left: 20px; border-left: 2px solid #333; padding-left: 10px; margin: 5px 0;">
+                                <div>Log ${i}: <span class="address">${log.address}</span></div>
+                                <div>Topics: ${log.topics.length}</div>
+                            </div>
+                        `).join('')}
+                    ` : ''}
+                `;
+                document.getElementById('tx-output').innerHTML = output;
+            } catch (error) {
+                document.getElementById('tx-output').innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+            }
+        }
+
+        async function getContractInfo() {
+            try {
+                const contractAddress = document.getElementById('contractSelect').value;
+                const code = await provider.getCode(contractAddress);
+                const balance = await provider.getBalance(contractAddress);
+                
+                const contractNames = {
+                    "0x5FbDB2315678afecb367f032d93F642f64180aa3": "HETU Token",
+                    "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512": "Intelligence Token (KEY)", 
+                    "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0": "PoCW Mainnet"
+                };
+                
+                const output = `
+                    <div class="success">📄 ${contractNames[contractAddress]}</div>
+                    <div><span class="highlight">Address:</span> <span class="address">${contractAddress}</span></div>
+                    <div><span class="highlight">Balance:</span> ${ethers.formatEther(balance)} ETH</div>
+                    <div><span class="highlight">Code Size:</span> ${code.length - 2} bytes</div>
+                    <div><span class="highlight">Is Contract:</span> ${code !== '0x' ? '<span class="success">Yes</span>' : '<span class="error">No</span>'}</div>
+                `;
+                document.getElementById('contract-output').innerHTML = output;
+            } catch (error) {
+                document.getElementById('contract-output').innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+            }
+        }
+
+        async function getRecentTransactions() {
+            try {
+                const latestBlock = await provider.getBlockNumber();
+                const transactions = [];
+                
+                for (let i = Math.max(0, latestBlock - 10); i <= latestBlock; i++) {
+                    const block = await provider.getBlock(i);
+                    if (block && block.transactions.length > 0) {
+                        for (const txHash of block.transactions) {
+                            const tx = await provider.getTransaction(txHash);
+                            transactions.push({...tx, blockNumber: i});
+                        }
+                    }
+                }
+                
+                const output = transactions.length > 0 ? `
+                    <div class="success">📄 Recent Transactions (${transactions.length})</div>
+                    ${transactions.slice(-10).reverse().map(tx => `
+                        <div style="margin: 10px 0; padding: 10px; border: 1px solid #333; background: #111;">
+                            <div><span class="highlight">Block ${tx.blockNumber}:</span> <span class="tx-hash">${tx.hash}</span></div>
+                            <div><span class="highlight">From:</span> <span class="address">${tx.from}</span></div>
+                            <div><span class="highlight">To:</span> <span class="address">${tx.to || 'Contract Creation'}</span></div>
+                            <div><span class="highlight">Value:</span> ${ethers.formatEther(tx.value)} ETH</div>
+                        </div>
+                    `).join('')}
+                ` : '<div class="error">No recent transactions found</div>';
+                
+                document.getElementById('recent-tx-output').innerHTML = output;
+            } catch (error) {
+                document.getElementById('recent-tx-output').innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+            }
+        }
+
+                                                                // Complete Working Function Signatures (IR-compatible)
+        const contractABIs = {
+            "0x5FbDB2315678afecb367f032d93F642f64180aa3": [
+                "function balanceOf(address) view returns (uint256)",
+                "function totalSupply() view returns (uint256)",
+                "function name() view returns (string)",
+                "function symbol() view returns (string)"
+            ],
+            "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512": [
+                "function balanceOf(address) view returns (uint256)",
+                "function totalSupply() view returns (uint256)",
+                "function name() view returns (string)",
+                "function symbol() view returns (string)"
+            ],
+            "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0": [
+                "function getReputationScores(address) view returns (uint256, uint256)",
+                "function calculateReputationScore(address) view returns (uint256)",
+                "function calculateValidatorReputationScore(address) view returns (uint256)",
+                "function minerIds(address) view returns (address, uint256, uint256, uint256, uint256, uint256, uint256, uint256, bool, bytes32)",
+                "function getValidatorStats(address) view returns (tuple(uint256,uint256,uint256,uint256,bool,uint256,uint256,uint256))",
+                "function getValidatorConfidenceScore(address) view returns (uint256)",
+                "function getEpochSubmission(bytes32, uint256) view returns (tuple(uint256,bytes,address[],uint256,bool,bool,uint256))",
+                "function getSubnet(bytes32) view returns (tuple(address[],uint256,bool,uint256,uint256))",
+                "function verifyAndDistributeRewards(bytes32, uint256, bool) returns (bool)",
+                "function submitAndDistributeEpoch(bytes32, uint256, bytes, address[], uint256, uint256, uint256, uint256[], uint256[]) returns (bool)"
+            ]
+        };
+
+        async function getAccountInfo() {
+            try {
+                const address = document.getElementById('accountAddress').value.trim();
+                if (!address) {
+                    document.getElementById('account-output').innerHTML = '<div class="error">❌ Please enter an address</div>';
+                    return;
+                }
+
+                // Basic account info
+                const ethBalance = await provider.getBalance(address);
+                const transactionCount = await provider.getTransactionCount(address);
+                const code = await provider.getCode(address);
+                const isContract = code !== '0x';
+
+                let output = `
+                    <div class="success">👤 Account: ${address}</div>
+                    <div><span class="highlight">ETH Balance:</span> ${ethers.formatEther(ethBalance)} ETH</div>
+                    <div><span class="highlight">Nonce:</span> ${transactionCount}</div>
+                    <div><span class="highlight">Type:</span> ${isContract ? '<span class="highlight">Contract</span>' : 'EOA (Externally Owned Account)'}</div>
+                `;
+
+                // Check token balances if contracts are deployed
+                try {
+                    // HETU Token balance
+                    const hetuInterface = new ethers.Interface(contractABIs["0x5FbDB2315678afecb367f032d93F642f64180aa3"]);
+                    const hetuContract = new ethers.Contract("0x5FbDB2315678afecb367f032d93F642f64180aa3", hetuInterface, provider);
+                    const hetuBalance = await hetuContract.balanceOf(address);
+                    
+                    // Intelligence Token balance  
+                    const keyInterface = new ethers.Interface(contractABIs["0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"]);
+                    const keyContract = new ethers.Contract("0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512", keyInterface, provider);
+                    const keyBalance = await keyContract.balanceOf(address);
+
+                    output += `
+                        <div style="margin-top: 15px;"><span class="highlight">Token Balances:</span></div>
+                        <div style="margin-left: 20px;"><span class="highlight">HETU:</span> ${ethers.formatEther(hetuBalance)} HETU</div>
+                        <div style="margin-left: 20px;"><span class="highlight">KEY:</span> ${ethers.formatEther(keyBalance)} KEY</div>
+                    `;
+
+                    // Get reputation scores from PoCW contract
+                    try {
+                        const pocwInterface = new ethers.Interface(contractABIs["0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"]);
+                        const pocwContract = new ethers.Contract("0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0", pocwInterface, provider);
+                        
+                        let minerRep = 0, validatorRep = 0;
+                        
+                        // Try to get reputation scores with fallback handling
+                        try {
+                            const result = await pocwContract.getReputationScores(address);
+                            minerRep = result[0];
+                            validatorRep = result[1];
+                        } catch (repError) {
+                            // If getReputationScores fails, try individual calls
+                            try {
+                                minerRep = await pocwContract.calculateReputationScore(address);
+                            } catch (e) {
+                                minerRep = 0;
+                            }
+                            try {
+                                validatorRep = await pocwContract.calculateValidatorReputationScore(address);
+                            } catch (e) {
+                                validatorRep = 0;
+                            }
+                        }
+                        
+                        // Only show relevant reputation scores
+                        if (Number(minerRep) > 0 && Number(validatorRep) > 0) {
+                            // Show both if account has both roles
+                            output += `
+                                <div style="margin-top: 15px;"><span class="highlight">Reputation Scores:</span></div>
+                                <div style="margin-left: 20px;"><span class="highlight">Miner Reputation:</span> ${minerRep.toString()} points</div>
+                                <div style="margin-left: 20px;"><span class="highlight">Validator Reputation:</span> ${validatorRep.toString()} points</div>
+                            `;
+                        } else if (Number(minerRep) > 0) {
+                            // Show only miner reputation
+                            output += `
+                                <div style="margin-top: 15px;"><span class="highlight">Miner Reputation:</span> ${minerRep.toString()} points</div>
+                            `;
+                        } else if (Number(validatorRep) > 0) {
+                            // Show only validator reputation
+                            output += `
+                                <div style="margin-top: 15px;"><span class="highlight">Validator Reputation:</span> ${validatorRep.toString()} points</div>
+                            `;
+                        } else if (Number(minerRep) === 0 && Number(validatorRep) === 0) {
+                            // Check if this is a known active address that should have reputation
+                            const knownActiveAddresses = {
+                                "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc": "Miner (should have reputation)",
+                                "0x70997970C51812dc3A010C7d01b50e0d17dc79C8": "Validator (may have reputation)"
+                            };
+                            
+                            if (knownActiveAddresses[address]) {
+                                output += `
+                                    <div style="margin-top: 15px;"><span class="highlight">Reputation:</span> <span style="color: #ff6b6b;">Unable to read (ABI/Interface issue)</span></div>
+                                    <div style="margin-left: 20px; color: #888; font-size: 0.9em;">Expected: ${knownActiveAddresses[address]}</div>
+                                `;
+                            } else {
+                                output += `
+                                    <div style="margin-top: 15px;"><span class="highlight">Reputation:</span> <span style="color: #888;">No reputation earned yet</span></div>
+                                `;
+                            }
+                        }
+                        
+                        // If has miner reputation, get detailed miner stats including validator votes
+                        if (minerRep > 0) {
+                            try {
+                                const minerData = await pocwContract.minerIds(address);
+                                
+                                // Parse miner data tuple: (address, uint256, uint256, uint256, uint256, uint256, uint256, uint256, bool, bytes32)
+                                if (minerData && minerData[0] !== "0x0000000000000000000000000000000000000000") {
+                                    const [owner, stakedHetu, totalIntelligenceMined, reputationScore, successfulTasks, totalTasks, totalValidatorVotes, positiveValidatorVotes, isSlashed, currentSubnet] = minerData;
+                                    
+                                    let consensusPercentage = 0;
+                                    if (Number(totalValidatorVotes) > 0) {
+                                        consensusPercentage = (Number(positiveValidatorVotes) * 100 / Number(totalValidatorVotes)).toFixed(1);
+                                    }
+                                    
+                                    // Calculate reputation with votes for comparison
+                                    let repWithVotes = 0;
+                                    try {
+                                        repWithVotes = await pocwContract.calculateReputationScoreWithVotes(address, 0, 0);
+                                    } catch (e) {
+                                        // Fallback if function not available
+                                    }
+                                    
+                                    output += `
+                                        <div style="margin-top: 10px;"><span class="highlight">Miner Stats:</span></div>
+                                        <div style="margin-left: 20px;">Staked HETU: ${ethers.formatEther(stakedHetu)} HETU</div>
+                                        <div style="margin-left: 20px;">Total Intelligence Mined: ${ethers.formatEther(totalIntelligenceMined)} KEY</div>
+                                        <div style="margin-left: 20px;">Successful Tasks: ${successfulTasks.toString()}</div>
+                                        <div style="margin-left: 20px;">Total Tasks: ${totalTasks.toString()}</div>
+                                        <div style="margin-left: 20px;">Task Success Rate: ${Number(totalTasks) > 0 ? ((Number(successfulTasks) * 100) / Number(totalTasks)).toFixed(1) + '%' : 'N/A'}</div>
+                                        <div style="margin-left: 20px;">Total Validator Votes: ${totalValidatorVotes.toString()}</div>
+                                        <div style="margin-left: 20px;">Positive Validator Votes: ${positiveValidatorVotes.toString()}</div>
+                                        <div style="margin-left: 20px;">Validator Consensus: <span style="color: ${Number(consensusPercentage) > 80 ? '#00ff00' : Number(consensusPercentage) > 60 ? '#ffff00' : '#ff6b6b'}">${consensusPercentage}%</span></div>
+                                        ${repWithVotes > 0 ? `<div style="margin-left: 20px;">Rep. with Vote Multiplier: ${repWithVotes.toString()} points</div>` : ''}
+                                        <div style="margin-left: 20px;">Status: ${isSlashed ? '❌ Slashed' : '✅ Active'}</div>
+                                    `;
+                                }
+                            } catch (e) {
+                                // Ignore miner stats error
+                            }
+                        }
+                        
+                        // If has validator reputation, get detailed validator stats
+                        if (validatorRep > 0) {
+                            try {
+                                const validatorStats = await pocwContract.getValidatorStats(address);
+                                const confidenceScore = await pocwContract.getValidatorConfidenceScore(address);
+                                
+                                // Parse validator stats tuple: (address, uint256, uint256, uint256, uint256, uint256, uint256, bool)
+                                const [validator, epochsSubmitted, totalRewardsDistributed, correctValidations, incorrectValidations, reputationScore, lastSubmissionTimestamp, isActive] = validatorStats;
+                                
+                                if (validator !== "0x0000000000000000000000000000000000000000") {
+                                    output += `
+                                        <div style="margin-top: 10px;"><span class="highlight">Validator Stats:</span></div>
+                                        <div style="margin-left: 20px;">Epochs Submitted: ${epochsSubmitted.toString()}</div>
+                                        <div style="margin-left: 20px;">Total Rewards Distributed: ${totalRewardsDistributed.toString()}</div>
+                                        <div style="margin-left: 20px;">Correct Validations: ${correctValidations.toString()}</div>
+                                        <div style="margin-left: 20px;">Incorrect Validations: ${incorrectValidations.toString()}</div>
+                                        <div style="margin-left: 20px;">Confidence Score: <span style="color: ${Number(confidenceScore) > 8000 ? '#00ff00' : Number(confidenceScore) > 5000 ? '#ffff00' : '#ff6b6b'}">${(Number(confidenceScore) / 100).toFixed(2)}%</span></div>
+                                        <div style="margin-left: 20px;">Last Submission: ${Number(lastSubmissionTimestamp) > 0 ? new Date(Number(lastSubmissionTimestamp) * 1000).toLocaleString() : 'Never'}</div>
+                                        <div style="margin-left: 20px;">Status: ${isActive ? '✅ Active' : '❌ Inactive'}</div>
+                                    `;
+                                }
+                            } catch (e) {
+                                // Ignore validator stats error
+                            }
+                        }
+                    } catch (repError) {
+                        output += `<div style="margin-top: 10px;"><span class="error">Reputation data not available</span></div>`;
+                    }
+                } catch (e) {
+                    output += `<div style="margin-top: 10px;"><span class="error">Token contracts not deployed or accessible</span></div>`;
+                }
+
+                // Check if it's a known address
+                const knownAddresses = {
+                    "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266": "🔧 Deployer/Owner",
+                    "0x70997970C51812dc3A010C7d01b50e0d17dc79C8": "✅ Validator 1", 
+                    "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC": "✅ Validator 2",
+                    "0x90F79bf6EB2c4f870365E785982E1f101E93b906": "✅ Validator 3",
+                    "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65": "✅ Validator 4",
+                    "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc": "⛏️ Miner 1",
+                    "0x5FbDB2315678afecb367f032d93F642f64180aa3": "🪙 HETU Token Contract",
+                    "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512": "🔑 Intelligence Token Contract", 
+                    "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0": "🌐 PoCW Mainnet Contract"
+                };
+
+                if (knownAddresses[address]) {
+                    output += `<div style="margin-top: 10px;"><span class="highlight">Role:</span> ${knownAddresses[address]}</div>`;
+                }
+
+                document.getElementById('account-output').innerHTML = output;
+            } catch (error) {
+                document.getElementById('account-output').innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+            }
+        }
+
+        async function decodeTransaction() {
+            try {
+                const txHash = document.getElementById('decodeTxHash').value.trim();
+                if (!txHash) {
+                    document.getElementById('decode-output').innerHTML = '<div class="error">❌ Please enter transaction hash</div>';
+                    return;
+                }
+                
+                const tx = await provider.getTransaction(txHash);
+                const receipt = await provider.getTransactionReceipt(txHash);
+                
+                let output = `
+                    <div class="success">🔍 Transaction Decoder</div>
+                    <div><span class="highlight">Hash:</span> <span class="tx-hash">${tx.hash}</span></div>
+                    <div><span class="highlight">To Contract:</span> <span class="address">${tx.to}</span></div>
+                    <div><span class="highlight">Status:</span> ${receipt.status === 1 ? '<span class="success">Success</span>' : '<span class="error">Failed</span>'}</div>
+                `;
+
+                // Decode function call if we have the ABI
+                if (tx.data && tx.data !== '0x' && contractABIs[tx.to]) {
+                    try {
+                        const contractInterface = new ethers.Interface(contractABIs[tx.to]);
+                        const decoded = contractInterface.parseTransaction({ data: tx.data, value: tx.value });
+                        
+                        output += `
+                            <div style="margin-top: 15px;"><span class="highlight">Function Call:</span></div>
+                            <div style="margin-left: 20px;"><span class="highlight">Function:</span> ${decoded.name}</div>
+                        `;
+                        
+                        if (decoded.args && decoded.args.length > 0) {
+                            output += `<div style="margin-left: 20px;"><span class="highlight">Parameters:</span></div>`;
+                            decoded.args.forEach((arg, idx) => {
+                                const param = decoded.fragment.inputs[idx];
+                                let value = arg.toString();
+                                
+                                // Format specific types
+                                if (param.type === 'uint256' && value.length > 10) {
+                                    value = `${ethers.formatEther(arg)} (${value} wei)`;
+                                } else if (param.type === 'bytes32') {
+                                    // bytes32 is usually a hash, don't try to decode as UTF-8
+                                    value = `${arg} (32-byte hash)`;
+                                } else if (param.type === 'bytes' && value.startsWith('0x')) {
+                                    try {
+                                        const decoded_bytes = ethers.toUtf8String(arg);
+                                        // Check if it looks like JSON (VLC data)
+                                        if (decoded_bytes.includes('{') && decoded_bytes.includes('}')) {
+                                            try {
+                                                const jsonData = JSON.parse(decoded_bytes);
+                                                value = `<div style="background: #0a0a0a; padding: 10px; margin: 5px 0; border: 1px solid #333;">
+                                                    <div style="color: #ffff00;">📊 VLC Graph Data:</div>
+                                                    <pre style="color: #00ff00; font-size: 11px; margin: 5px 0; white-space: pre-wrap;">${JSON.stringify(jsonData, null, 2)}</pre>
+                                                </div>`;
+                                            } catch (jsonError) {
+                                                value = `Text data: "${decoded_bytes}"`;
+                                            }
+                                        } else {
+                                            // Regular text data
+                                            value = `Text: "${decoded_bytes.replace(/\0/g, '')}"`;
+                                        }
+                                    } catch (e) {
+                                        // Not valid UTF-8, treat as binary
+                                        value = `Binary data (${(value.length - 2) / 2} bytes): ${value.substring(0, 50)}${value.length > 50 ? '...' : ''}`;
+                                    }
+                                } else if (param.type.includes('address')) {
+                                    if (Array.isArray(arg)) {
+                                        value = arg.map(addr => `<span class="address">${addr}</span>`).join(', ');
+                                    } else {
+                                        value = `<span class="address">${arg}</span>`;
+                                    }
+                                } else if (param.type === 'string') {
+                                    value = `"${arg}"`;
+                                } else if (param.type.includes('[]')) {
+                                    // Handle arrays
+                                    if (Array.isArray(arg)) {
+                                        value = `[${arg.join(', ')}] (${arg.length} items)`;
+                                    } else {
+                                        value = arg.toString();
+                                    }
+                                } else if (param.type === 'bool') {
+                                    value = arg ? '✅ true' : '❌ false';
+                                }
+                                
+                                output += `<div style="margin-left: 40px;">${param.name} (${param.type}): ${value}</div>`;
+                            });
+                        }
+                    } catch (e) {
+                        output += `<div style="margin-top: 10px;"><span class="error">Could not decode function call: ${e.message}</span></div>`;
+                        output += `<div style="margin-top: 10px;"><span class="highlight">Raw Data:</span> ${tx.data}</div>`;
+                    }
+                } else if (tx.data && tx.data !== '0x') {
+                    output += `<div style="margin-top: 10px;"><span class="highlight">Raw Input Data:</span><br><div style="word-break: break-all; font-size: 10px; background: #0a0a0a; padding: 10px;">${tx.data}</div></div>`;
+                }
+
+                // Decode events
+                if (receipt.logs && receipt.logs.length > 0) {
+                    output += `<div style="margin-top: 15px;"><span class="highlight">Events Emitted (${receipt.logs.length}):</span></div>`;
+                    
+                    receipt.logs.forEach((log, idx) => {
+                        if (contractABIs[log.address]) {
+                            try {
+                                const contractInterface = new ethers.Interface(contractABIs[log.address]);
+                                const parsedLog = contractInterface.parseLog(log);
+                                
+                                output += `
+                                    <div style="margin-left: 20px; border-left: 2px solid #333; padding-left: 10px; margin: 5px 0;">
+                                        <div><span class="highlight">Event:</span> ${parsedLog.name}</div>
+                                        <div><span class="highlight">Contract:</span> <span class="address">${log.address}</span></div>
+                                `;
+                                
+                                if (parsedLog.args && parsedLog.args.length > 0) {
+                                    parsedLog.args.forEach((arg, argIdx) => {
+                                        const input = parsedLog.fragment.inputs[argIdx];
+                                        let value = arg.toString();
+                                        
+                                        if (input.type === 'uint256' && value.length > 10) {
+                                            value = `${ethers.formatEther(arg)} tokens`;
+                                        } else if (input.type.includes('address')) {
+                                            value = `<span class="address">${arg}</span>`;
+                                        }
+                                        
+                                        output += `<div style="margin-left: 20px;">${input.name}: ${value}</div>`;
+                                    });
+                                }
+                                output += `</div>`;
+                            } catch (e) {
+                                output += `
+                                    <div style="margin-left: 20px; border-left: 2px solid #333; padding-left: 10px; margin: 5px 0;">
+                                        <div>Event ${idx}: <span class="address">${log.address}</span></div>
+                                        <div>Topics: ${log.topics.length}</div>
+                                    </div>
+                                `;
+                            }
+                        } else {
+                            output += `
+                                <div style="margin-left: 20px; border-left: 2px solid #333; padding-left: 10px; margin: 5px 0;">
+                                    <div>Event ${idx}: <span class="address">${log.address}</span></div>
+                                    <div>Topics: ${log.topics.length}</div>
+                                </div>
+                            `;
+                        }
+                    });
+                }
+
+                document.getElementById('decode-output').innerHTML = output;
+            } catch (error) {
+                document.getElementById('decode-output').innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+            }
+        }
+
+        // Auto-check network on page load
+        window.addEventListener('load', checkNetwork);
+    </script>
+</body>
+</html>
