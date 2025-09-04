@@ -6,12 +6,47 @@
 package subnet
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"sync"
+	"time"
 
 	"github.com/hetu-project/Intelligence-KEY-Mining/dgraph"
 	"github.com/hetu-project/Intelligence-KEY-Mining/vlc"
 )
+
+// EpochFinalizedCallback is called when an epoch is finalized
+type EpochFinalizedCallback func(epochNumber int, subnetID string, epochData *EpochData)
+
+// RoundData contains detailed information about a single round
+type RoundData struct {
+	RoundNumber     int                 `json:"roundNumber"`
+	RequestID       string              `json:"requestId"`
+	UserInput       string              `json:"userInput"`
+	MinerOutput     string              `json:"minerOutput"`
+	MinerOutputType string              `json:"minerOutputType"`
+	InfoRequest     string              `json:"infoRequest,omitempty"`
+	InfoResponse    string              `json:"infoResponse,omitempty"`
+	ConsensusResult string              `json:"consensusResult"`
+	UserFeedback    string              `json:"userFeedback"`
+	UserAccept      bool                `json:"userAccept"`
+	FinalResult     string              `json:"finalResult"`
+	VLCClockState   map[int]int         `json:"vlcClockState"`
+	Success         bool                `json:"success"`
+}
+
+// EpochData contains the data for a completed epoch
+type EpochData struct {
+	EpochNumber       int                 `json:"epochNumber"`
+	SubnetID          string              `json:"subnetId"`
+	CompletedRounds   []string            `json:"completedRounds"`         // Legacy event IDs
+	DetailedRounds    []RoundData         `json:"detailedRounds"`          // Rich round data
+	VLCClockState     map[int]int         `json:"vlcClockState"`
+	EpochEventID      string              `json:"epochEventId"`
+	ParentRoundEventID string             `json:"parentRoundEventId"`
+}
 
 // SubnetGraphAdapter adapts PoCW subnet events for causal graph visualization.
 // It tracks round-based interactions and creates Dgraph events that show
@@ -30,15 +65,18 @@ import (
 //   - Parent-child relationships reflect VLC causality
 //   - Only events from VLC participants (Miner=1, Validator-1=2) have full VLC data
 type SubnetGraphAdapter struct {
-	EventGraph        *dgraph.EventGraph // Dgraph event graph for visualization
-	SubnetID          string             // Subnet identifier
-	mu                sync.RWMutex       // Protects event tracking state
-	roundCounters     map[string]int     // Per-request round counters
-	completedRounds   []string           // Track completed rounds for epoch creation
-	epochCount        int                // Current epoch number
-	lastEventInChain  string             // Last event for continuous chaining
-	genesisEventID    string             // Genesis state event ID
-	roundsInEpoch     int                // Counter for rounds within current epoch
+	EventGraph        *dgraph.EventGraph     // Dgraph event graph for visualization
+	SubnetID          string                 // Subnet identifier
+	mu                sync.RWMutex           // Protects event tracking state
+	roundCounters     map[string]int         // Per-request round counters
+	completedRounds   []string               // Track completed rounds for epoch creation
+	epochCount        int                    // Current epoch number
+	lastEventInChain  string                 // Last event for continuous chaining
+	genesisEventID    string                 // Genesis state event ID
+	roundsInEpoch     int                    // Counter for rounds within current epoch
+	epochCallback     EpochFinalizedCallback // Callback triggered when epoch is finalized
+	bridgeURL         string                 // URL of the JavaScript bridge service
+	currentRounds     map[string]*RoundData  // Track detailed data for rounds in current epoch
 }
 
 // NewSubnetGraphAdapter creates a new graph adapter for subnet visualization
@@ -52,11 +90,87 @@ func NewSubnetGraphAdapter(subnetID string, nodeID int, nodeAddr string) *Subnet
 		lastEventInChain: "",
 		genesisEventID:   "",
 		roundsInEpoch:    0,
+		bridgeURL:        "", // No default bridge URL - must be explicitly set
+		currentRounds:    make(map[string]*RoundData),
 	}
 	
 	// Create Genesis State immediately
 	sga.createGenesisState()
 	return sga
+}
+
+// SetEpochFinalizedCallback sets the callback function to be triggered when an epoch is finalized
+func (sga *SubnetGraphAdapter) SetEpochFinalizedCallback(callback EpochFinalizedCallback) {
+	sga.mu.Lock()
+	defer sga.mu.Unlock()
+	sga.epochCallback = callback
+}
+
+// SetBridgeURL sets the URL for the JavaScript bridge service
+func (sga *SubnetGraphAdapter) SetBridgeURL(url string) {
+	sga.mu.Lock()
+	defer sga.mu.Unlock()
+	sga.bridgeURL = url
+}
+
+// sendEpochToBridge sends epoch data to the JavaScript bridge via HTTP POST
+func (sga *SubnetGraphAdapter) sendEpochToBridge(epochData *EpochData) error {
+	// Prepare the payload for the bridge
+	payload := map[string]interface{}{
+		"epochNumber":    epochData.EpochNumber,
+		"subnetId":       epochData.SubnetID,
+		"completedRounds": epochData.CompletedRounds,
+		"detailedRounds": epochData.DetailedRounds,
+		"vlcClockState":  epochData.VLCClockState,
+		"epochEventId":   epochData.EpochEventID,
+		"parentRoundEventId": epochData.ParentRoundEventID,
+		"timestamp":      time.Now().Unix(),
+	}
+	
+	// Debug log the detailed rounds being sent
+	fmt.Printf("🔍 DEBUG - Sending %d detailed rounds to bridge:\n", len(epochData.DetailedRounds))
+	for i, round := range epochData.DetailedRounds {
+		inputPreview := round.UserInput
+		if len(inputPreview) > 40 {
+			inputPreview = inputPreview[:40] + "..."
+		}
+		fmt.Printf("   Round %d: %s (Success: %t)\n", i+1, inputPreview, round.Success)
+	}
+
+	// Convert to JSON
+	jsonPayload, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal epoch data: %v", err)
+	}
+	
+	// Debug: Print summary of payload
+	fmt.Printf("📤 Sending epoch data: %d detailed rounds, %d bytes\n", len(epochData.DetailedRounds), len(jsonPayload))
+
+	// Create HTTP request
+	req, err := http.NewRequest("POST", sga.bridgeURL+"/submit-epoch", bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP request: %v", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	// Send request with timeout
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send epoch data to bridge: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("bridge returned error status: %d", resp.StatusCode)
+	}
+
+	fmt.Printf("✅ Epoch %d data sent to bridge successfully (Status: %d)\n", epochData.EpochNumber, resp.StatusCode)
+	return nil
 }
 
 // createGenesisState creates the initial genesis state for the blockchain
@@ -88,6 +202,22 @@ func (sga *SubnetGraphAdapter) TrackUserInput(requestID string, input string, va
 	// Increment round counter for this request
 	sga.roundCounters[requestID]++
 	roundNum := sga.roundCounters[requestID]
+
+	// Initialize or update round data
+	if sga.currentRounds[requestID] == nil {
+		// Calculate the round number within the current epoch (1, 2, or 3)
+		// roundsInEpoch starts at 0, so we add 1 to get the current round number
+		epochRoundNumber := sga.roundsInEpoch + 1
+		sga.currentRounds[requestID] = &RoundData{
+			RoundNumber:   epochRoundNumber,
+			RequestID:     requestID,
+			VLCClockState: make(map[int]int),
+		}
+		// Debug: Log round creation
+		// fmt.Printf("🔍 Created round %d data for request %s\n", epochRoundNumber, requestID)
+	}
+	sga.currentRounds[requestID].UserInput = input
+	sga.currentRounds[requestID].VLCClockState = vlcToMap(validatorClock)
 
 	// Create semantic event name
 	eventName := "UserInput"
@@ -123,6 +253,21 @@ func (sga *SubnetGraphAdapter) TrackUserInput(requestID string, input string, va
 func (sga *SubnetGraphAdapter) TrackMinerResponse(requestID string, response *MinerResponseMessage, parentEventID string) string {
 	sga.mu.Lock()
 	defer sga.mu.Unlock()
+
+	// Update round data with miner response
+	if round := sga.currentRounds[requestID]; round != nil {
+		if response.OutputType == OutputReady {
+			round.MinerOutput = response.Output
+			round.MinerOutputType = "output_ready"
+		} else {
+			round.InfoRequest = response.InfoRequest
+			round.MinerOutputType = "info_request"
+		}
+		// Update VLC state
+		for k, v := range vlcToMap(response.VLCClock) {
+			round.VLCClockState[k] = v
+		}
+	}
 
 	// Create semantic event name based on miner response type
 	var eventName, key, value string
@@ -160,6 +305,15 @@ func (sga *SubnetGraphAdapter) TrackInfoResponse(requestID string, additionalInf
 	sga.mu.Lock()
 	defer sga.mu.Unlock()
 
+	// Update round data with info response
+	if round := sga.currentRounds[requestID]; round != nil {
+		round.InfoResponse = additionalInfo
+		// Update VLC state
+		for k, v := range vlcToMap(validatorClock) {
+			round.VLCClockState[k] = v
+		}
+	}
+
 	eventName := "InfoResponse"
 	key := fmt.Sprintf("info_response_%s", requestID)
 	value := fmt.Sprintf("User clarifies: %s", additionalInfo)
@@ -186,6 +340,19 @@ func (sga *SubnetGraphAdapter) TrackInfoResponse(requestID string, additionalInf
 func (sga *SubnetGraphAdapter) TrackRoundComplete(requestID string, roundNum int, validatorClock *vlc.Clock, consensusResult string, userFeedback string, userAccept bool, finalResult string, parentEventID string) string {
 	sga.mu.Lock()
 	defer sga.mu.Unlock()
+
+	// Complete round data with final results
+	if round := sga.currentRounds[requestID]; round != nil {
+		round.ConsensusResult = consensusResult
+		round.UserFeedback = userFeedback
+		round.UserAccept = userAccept
+		round.FinalResult = finalResult
+		round.Success = userAccept && finalResult == "OUTPUT DELIVERED TO USER"
+		// Final VLC state update
+		for k, v := range vlcToMap(validatorClock) {
+			round.VLCClockState[k] = v
+		}
+	}
 
 	// Determine semantic event name based on final outcome
 	var eventName string
@@ -277,6 +444,68 @@ func (sga *SubnetGraphAdapter) createEpochFinalization(validatorClock *vlc.Clock
 		clockMap,
 		[]string{parentRoundEventID}, // Connect to round 3 of the epoch
 	)
+	
+	// Trigger epoch finalized callback or HTTP bridge if configured
+	if sga.epochCallback != nil || sga.bridgeURL != "" {
+		epochData := &EpochData{
+			EpochNumber:        sga.epochCount,
+			SubnetID:           sga.SubnetID,
+			CompletedRounds:    make([]string, len(sga.completedRounds)),
+			DetailedRounds:     make([]RoundData, 0),
+			VLCClockState:      make(map[int]int),
+			EpochEventID:       epochEventID,
+			ParentRoundEventID: parentRoundEventID,
+		}
+		
+		// Copy completed rounds for this epoch (last 3 rounds)
+		copy(epochData.CompletedRounds, sga.completedRounds)
+		
+		// IMPORTANT: Copy detailed round data BEFORE clearing currentRounds
+		fmt.Printf("🔍 DEBUG - Current rounds in memory: %d\n", len(sga.currentRounds))
+		for requestID, roundData := range sga.currentRounds {
+			if roundData != nil {
+				// Create a copy of the round data
+				epochData.DetailedRounds = append(epochData.DetailedRounds, *roundData)
+				inputPreview := roundData.UserInput
+				if len(inputPreview) > 50 {
+					inputPreview = inputPreview[:50] + "..."
+				}
+				fmt.Printf("📋 Including round %d data for request %s: %s (Success: %t)\n", roundData.RoundNumber, requestID, inputPreview, roundData.Success)
+			}
+		}
+		fmt.Printf("🔍 DEBUG - Copied %d detailed rounds to epochData\n", len(epochData.DetailedRounds))
+		
+		// Copy VLC clock state
+		for nodeID, value := range validatorClock.Values {
+			epochData.VLCClockState[int(nodeID)] = int(value)
+		}
+		
+		fmt.Printf("🚀 Epoch %d finalized - triggering mainnet submission\n", sga.epochCount)
+		
+		// Send epoch data to JavaScript bridge asynchronously
+		go func() {
+			// Try HTTP bridge first if URL is set
+			if sga.bridgeURL != "" {
+				fmt.Printf("📡 Sending Epoch %d data to JavaScript bridge...\n", epochData.EpochNumber)
+				if err := sga.sendEpochToBridge(epochData); err != nil {
+					fmt.Printf("❌ Failed to send epoch data to bridge: %v\n", err)
+					if sga.epochCallback != nil {
+						fmt.Printf("🔄 Falling back to callback method...\n")
+						sga.epochCallback(sga.epochCount, sga.SubnetID, epochData)
+					}
+				} else {
+					fmt.Printf("✅ Epoch %d submitted to mainnet via bridge!\n", epochData.EpochNumber)
+				}
+			} else if sga.epochCallback != nil {
+				// Use callback method if no bridge URL
+				sga.epochCallback(sga.epochCount, sga.SubnetID, epochData)
+			}
+		}()
+	}
+	
+	// Reset completed rounds and current round data for next epoch
+	sga.completedRounds = make([]string, 0)
+	sga.currentRounds = make(map[string]*RoundData)
 	
 	return epochEventID
 }
