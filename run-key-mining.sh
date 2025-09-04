@@ -37,6 +37,40 @@ if ! command -v node &> /dev/null; then
     exit 1
 fi
 
+# Check if npm dependencies are installed
+if [ ! -d "node_modules" ] || [ ! -f "node_modules/ethers/package.json" ]; then
+    echo "📦 Installing Node.js dependencies..."
+    npm install
+    if [ $? -ne 0 ]; then
+        echo "❌ Failed to install Node.js dependencies. Please run 'npm install' manually."
+        exit 1
+    fi
+    echo "✅ Node.js dependencies installed successfully"
+else
+    echo "✅ Node.js dependencies already installed"
+fi
+
+# Check if Foundry dependencies (OpenZeppelin contracts) are installed
+if [ ! -d "lib/openzeppelin-contracts" ]; then
+    echo "📦 Installing Foundry dependencies (OpenZeppelin contracts)..."
+    # Determine correct forge path
+    if [ -n "$SUDO_USER" ]; then
+        USER_HOME=$(eval echo ~$SUDO_USER)
+        FORGE_CMD="$USER_HOME/.foundry/bin/forge"
+    else
+        FORGE_CMD="$HOME/.foundry/bin/forge"
+    fi
+    
+    $FORGE_CMD install OpenZeppelin/openzeppelin-contracts
+    if [ $? -ne 0 ]; then
+        echo "❌ Failed to install Foundry dependencies. Please run 'forge install OpenZeppelin/openzeppelin-contracts' manually."
+        exit 1
+    fi
+    echo "✅ Foundry dependencies installed successfully"
+else
+    echo "✅ Foundry dependencies already installed"
+fi
+
 echo "✅ All prerequisites found"
 
 # Cleanup function
@@ -256,65 +290,75 @@ VALIDATOR3="0x90F79bf6EB2c4f870365E785982E1f101E93b906"
 VALIDATOR4="0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
 MINER="0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc"
 
+# Determine correct forge path
+if [ -n "$SUDO_USER" ]; then
+    USER_HOME=$(eval echo ~$SUDO_USER)
+    FORGE_PATH="$USER_HOME/.foundry/bin/forge"
+    CAST_PATH="$USER_HOME/.foundry/bin/cast"
+else
+    FORGE_PATH="$HOME/.foundry/bin/forge"
+    CAST_PATH="$HOME/.foundry/bin/cast"
+fi
+
 # Compile contracts
 echo "Compiling contracts..."
-forge build > /dev/null 2>&1
+$FORGE_PATH build > /dev/null 2>&1
 
 # Deploy contracts
 echo "Deploying HETU Token..."
-HETU_RESULT=$(forge create contracts/HETUToken.sol:HETUToken \
+HETU_RESULT=$($FORGE_PATH create contracts/HETUToken.sol:HETUToken \
     --private-key $PRIVATE_KEY --rpc-url $RPC_URL --broadcast 2>&1)
 HETU_ADDRESS=$(echo "$HETU_RESULT" | grep -o "Deployed to: 0x[a-fA-F0-9]\{40\}" | cut -d' ' -f3)
 
 echo "Deploying KEY Token..."
-KEY_RESULT=$(forge create contracts/KEYToken.sol:KEYToken \
+KEY_RESULT=$($FORGE_PATH create contracts/KEYToken.sol:KEYToken \
     --private-key $PRIVATE_KEY --rpc-url $RPC_URL --broadcast 2>&1)
 KEY_ADDRESS=$(echo "$KEY_RESULT" | grep -o "Deployed to: 0x[a-fA-F0-9]\{40\}" | cut -d' ' -f3)
 
 echo "Deploying Subnet Registry..."
-REGISTRY_RESULT=$(forge create contracts/SubnetRegistry.sol:SubnetRegistry \
+REGISTRY_RESULT=$($FORGE_PATH create contracts/SubnetRegistry.sol:SubnetRegistry \
     --private-key $PRIVATE_KEY --rpc-url $RPC_URL --broadcast 2>&1)
 REGISTRY_ADDRESS=$(echo "$REGISTRY_RESULT" | grep -o "Deployed to: 0x[a-fA-F0-9]\{40\}" | cut -d' ' -f3)
 
 echo "Deploying Enhanced PoCW Verifier..."
-VERIFIER_RESULT=$(forge create contracts/EnhancedPoCWVerifier.sol:EnhancedPoCWVerifier \
+VERIFIER_RESULT=$($FORGE_PATH create contracts/EnhancedPoCWVerifier.sol:EnhancedPoCWVerifier \
     --private-key $PRIVATE_KEY --rpc-url $RPC_URL --broadcast 2>&1)
 VERIFIER_ADDRESS=$(echo "$VERIFIER_RESULT" | grep -o "Deployed to: 0x[a-fA-F0-9]\{40\}" | cut -d' ' -f3)
 
 # Initialize contracts
 echo "Initializing contracts..."
-cast send $REGISTRY_ADDRESS "initialize(address)" $HETU_ADDRESS \
+$CAST_PATH send $REGISTRY_ADDRESS "initialize(address)" $HETU_ADDRESS \
     --private-key $PRIVATE_KEY --rpc-url $RPC_URL > /dev/null 2>&1
 
-cast send $VERIFIER_ADDRESS "initialize(address,address)" $KEY_ADDRESS $REGISTRY_ADDRESS \
+$CAST_PATH send $VERIFIER_ADDRESS "initialize(address,address)" $KEY_ADDRESS $REGISTRY_ADDRESS \
     --private-key $PRIVATE_KEY --rpc-url $RPC_URL > /dev/null 2>&1
 
-cast send $KEY_ADDRESS "setPoCWVerifier(address)" $VERIFIER_ADDRESS \
+$CAST_PATH send $KEY_ADDRESS "setPoCWVerifier(address)" $VERIFIER_ADDRESS \
     --private-key $PRIVATE_KEY --rpc-url $RPC_URL > /dev/null 2>&1
 
 # Distribute HETU and setup subnet
 echo "Setting up subnet participants..."
-cast send $HETU_ADDRESS "transfer(address,uint256)" $MINER $(cast --to-wei 2000) \
+$CAST_PATH send $HETU_ADDRESS "transfer(address,uint256)" $MINER $($CAST_PATH --to-wei 2000) \
     --private-key $PRIVATE_KEY --rpc-url $RPC_URL > /dev/null 2>&1
 
 for VALIDATOR in $VALIDATOR1 $VALIDATOR2 $VALIDATOR3 $VALIDATOR4; do
-    cast send $HETU_ADDRESS "transfer(address,uint256)" $VALIDATOR $(cast --to-wei 2000) \
+    $CAST_PATH send $HETU_ADDRESS "transfer(address,uint256)" $VALIDATOR $($CAST_PATH --to-wei 2000) \
         --private-key $PRIVATE_KEY --rpc-url $RPC_URL > /dev/null 2>&1
 done
 
 # Approvals
-cast send $HETU_ADDRESS "approve(address,uint256)" $REGISTRY_ADDRESS $(cast --to-wei 500) \
+$CAST_PATH send $HETU_ADDRESS "approve(address,uint256)" $REGISTRY_ADDRESS $($CAST_PATH --to-wei 500) \
     --private-key $MINER_KEY --rpc-url $RPC_URL > /dev/null 2>&1
 
 VALIDATOR_KEYS=("$VALIDATOR1_KEY" "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a" "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6" "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a")
 for i in 0 1 2 3; do
-    cast send $HETU_ADDRESS "approve(address,uint256)" $REGISTRY_ADDRESS $(cast --to-wei 100) \
+    $CAST_PATH send $HETU_ADDRESS "approve(address,uint256)" $REGISTRY_ADDRESS $($CAST_PATH --to-wei 100) \
         --private-key ${VALIDATOR_KEYS[$i]} --rpc-url $RPC_URL > /dev/null 2>&1
 done
 
 # Register subnet
 SUBNET_ID="per-epoch-subnet-001"
-cast send $REGISTRY_ADDRESS "registerSubnet(string,address,address[4])" \
+$CAST_PATH send $REGISTRY_ADDRESS "registerSubnet(string,address,address[4])" \
     "$SUBNET_ID" \
     "$MINER" \
     "[$VALIDATOR1,$VALIDATOR2,$VALIDATOR3,$VALIDATOR4]" \
@@ -350,31 +394,31 @@ echo ""
 echo "💰 Initial KEY Token Balances (Before Mining)"
 echo "────────────────────────────────────────────────"
 echo "📊 Miner ($MINER):"
-MINER_INITIAL=$(cast call $KEY_ADDRESS "balanceOf(address)(uint256)" $MINER --rpc-url $RPC_URL)
+MINER_INITIAL=$($CAST_PATH call $KEY_ADDRESS "balanceOf(address)(uint256)" $MINER --rpc-url $RPC_URL)
 MINER_INITIAL_FORMATTED=$(format_key_balance $MINER_INITIAL)
 echo "   Balance: $MINER_INITIAL_FORMATTED KEY"
 
 echo "📊 Validator-1 ($VALIDATOR1):"
-V1_INITIAL=$(cast call $KEY_ADDRESS "balanceOf(address)(uint256)" $VALIDATOR1 --rpc-url $RPC_URL)
+V1_INITIAL=$($CAST_PATH call $KEY_ADDRESS "balanceOf(address)(uint256)" $VALIDATOR1 --rpc-url $RPC_URL)
 V1_INITIAL_FORMATTED=$(format_key_balance $V1_INITIAL)
 echo "   Balance: $V1_INITIAL_FORMATTED KEY"
 
 echo "📊 Validator-2 ($VALIDATOR2):"
-V2_INITIAL=$(cast call $KEY_ADDRESS "balanceOf(address)(uint256)" $VALIDATOR2 --rpc-url $RPC_URL)
+V2_INITIAL=$($CAST_PATH call $KEY_ADDRESS "balanceOf(address)(uint256)" $VALIDATOR2 --rpc-url $RPC_URL)
 V2_INITIAL_FORMATTED=$(format_key_balance $V2_INITIAL)
 echo "   Balance: $V2_INITIAL_FORMATTED KEY"
 
 echo "📊 Validator-3 ($VALIDATOR3):"
-V3_INITIAL=$(cast call $KEY_ADDRESS "balanceOf(address)(uint256)" $VALIDATOR3 --rpc-url $RPC_URL)
+V3_INITIAL=$($CAST_PATH call $KEY_ADDRESS "balanceOf(address)(uint256)" $VALIDATOR3 --rpc-url $RPC_URL)
 V3_INITIAL_FORMATTED=$(format_key_balance $V3_INITIAL)
 echo "   Balance: $V3_INITIAL_FORMATTED KEY"
 
 echo "📊 Validator-4 ($VALIDATOR4):"
-V4_INITIAL=$(cast call $KEY_ADDRESS "balanceOf(address)(uint256)" $VALIDATOR4 --rpc-url $RPC_URL)
+V4_INITIAL=$($CAST_PATH call $KEY_ADDRESS "balanceOf(address)(uint256)" $VALIDATOR4 --rpc-url $RPC_URL)
 V4_INITIAL_FORMATTED=$(format_key_balance $V4_INITIAL)
 echo "   Balance: $V4_INITIAL_FORMATTED KEY"
 
-TOTAL_SUPPLY_INITIAL=$(cast call $KEY_ADDRESS "totalSupply()(uint256)" --rpc-url $RPC_URL)
+TOTAL_SUPPLY_INITIAL=$($CAST_PATH call $KEY_ADDRESS "totalSupply()(uint256)" --rpc-url $RPC_URL)
 TOTAL_SUPPLY_INITIAL_FORMATTED=$(format_key_balance $TOTAL_SUPPLY_INITIAL)
 echo "📊 Total Supply: $TOTAL_SUPPLY_INITIAL_FORMATTED KEY"
 echo ""
@@ -503,36 +547,36 @@ echo ""
 echo "💰 Final KEY Token Balances (After Mining)"
 echo "────────────────────────────────────────────────"
 echo "📊 Miner ($MINER):"
-MINER_FINAL=$(cast call $KEY_ADDRESS "balanceOf(address)(uint256)" $MINER --rpc-url $RPC_URL)
+MINER_FINAL=$($CAST_PATH call $KEY_ADDRESS "balanceOf(address)(uint256)" $MINER --rpc-url $RPC_URL)
 MINER_FINAL_FORMATTED=$(format_key_balance $MINER_FINAL)
 MINER_GAINED=$(echo "$MINER_FINAL_FORMATTED - $MINER_INITIAL_FORMATTED" | bc -l)
 echo "   Balance: $MINER_FINAL_FORMATTED KEY (+$MINER_GAINED KEY mined)"
 
 echo "📊 Validator-1 ($VALIDATOR1):"
-V1_FINAL=$(cast call $KEY_ADDRESS "balanceOf(address)(uint256)" $VALIDATOR1 --rpc-url $RPC_URL)
+V1_FINAL=$($CAST_PATH call $KEY_ADDRESS "balanceOf(address)(uint256)" $VALIDATOR1 --rpc-url $RPC_URL)
 V1_FINAL_FORMATTED=$(format_key_balance $V1_FINAL)
 V1_GAINED=$(echo "$V1_FINAL_FORMATTED - $V1_INITIAL_FORMATTED" | bc -l)
 echo "   Balance: $V1_FINAL_FORMATTED KEY (+$V1_GAINED KEY mined)"
 
 echo "📊 Validator-2 ($VALIDATOR2):"
-V2_FINAL=$(cast call $KEY_ADDRESS "balanceOf(address)(uint256)" $VALIDATOR2 --rpc-url $RPC_URL)
+V2_FINAL=$($CAST_PATH call $KEY_ADDRESS "balanceOf(address)(uint256)" $VALIDATOR2 --rpc-url $RPC_URL)
 V2_FINAL_FORMATTED=$(format_key_balance $V2_FINAL)
 V2_GAINED=$(echo "$V2_FINAL_FORMATTED - $V2_INITIAL_FORMATTED" | bc -l)
 echo "   Balance: $V2_FINAL_FORMATTED KEY (+$V2_GAINED KEY mined)"
 
 echo "📊 Validator-3 ($VALIDATOR3):"
-V3_FINAL=$(cast call $KEY_ADDRESS "balanceOf(address)(uint256)" $VALIDATOR3 --rpc-url $RPC_URL)
+V3_FINAL=$($CAST_PATH call $KEY_ADDRESS "balanceOf(address)(uint256)" $VALIDATOR3 --rpc-url $RPC_URL)
 V3_FINAL_FORMATTED=$(format_key_balance $V3_FINAL)
 V3_GAINED=$(echo "$V3_FINAL_FORMATTED - $V3_INITIAL_FORMATTED" | bc -l)
 echo "   Balance: $V3_FINAL_FORMATTED KEY (+$V3_GAINED KEY mined)"
 
 echo "📊 Validator-4 ($VALIDATOR4):"
-V4_FINAL=$(cast call $KEY_ADDRESS "balanceOf(address)(uint256)" $VALIDATOR4 --rpc-url $RPC_URL)
+V4_FINAL=$($CAST_PATH call $KEY_ADDRESS "balanceOf(address)(uint256)" $VALIDATOR4 --rpc-url $RPC_URL)
 V4_FINAL_FORMATTED=$(format_key_balance $V4_FINAL)
 V4_GAINED=$(echo "$V4_FINAL_FORMATTED - $V4_INITIAL_FORMATTED" | bc -l)
 echo "   Balance: $V4_FINAL_FORMATTED KEY (+$V4_GAINED KEY mined)"
 
-TOTAL_SUPPLY_FINAL=$(cast call $KEY_ADDRESS "totalSupply()(uint256)" --rpc-url $RPC_URL)
+TOTAL_SUPPLY_FINAL=$($CAST_PATH call $KEY_ADDRESS "totalSupply()(uint256)" --rpc-url $RPC_URL)
 TOTAL_SUPPLY_FINAL_FORMATTED=$(format_key_balance $TOTAL_SUPPLY_FINAL)
 TOTAL_MINED=$(echo "$TOTAL_SUPPLY_FINAL_FORMATTED - $TOTAL_SUPPLY_INITIAL_FORMATTED" | bc -l)
 echo "📊 Total Supply: $TOTAL_SUPPLY_FINAL_FORMATTED KEY (+$TOTAL_MINED KEY total mined)"
