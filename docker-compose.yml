@@ -1,0 +1,435 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # Infrastructure Services
+  # ============================================
+  
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: pocw-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-pocw_root_password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-pocw_db}
+      MYSQL_USER: ${MYSQL_USER:-pocw_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-pocw_password}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./scripts/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    ports:
+      - "3306:3306"
+    networks:
+      - pocw-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  # Dgraph Database
+  dgraph-zero:
+    image: dgraph/dgraph:latest
+    container_name: pocw-dgraph-zero
+    restart: unless-stopped
+    volumes:
+      - dgraph_zero_data:/dgraph
+    ports:
+      - "5080:5080"
+      - "6080:6080"
+    networks:
+      - pocw-network
+    command: dgraph zero --my=dgraph-zero:5080
+
+  dgraph-alpha:
+    image: dgraph/dgraph:latest
+    container_name: pocw-dgraph-alpha
+    restart: unless-stopped
+    volumes:
+      - dgraph_alpha_data:/dgraph
+    ports:
+      - "8080:8080"
+      - "9080:9080"
+    networks:
+      - pocw-network
+    command: dgraph alpha --my=dgraph-alpha:7080 --zero=dgraph-zero:5080 --security whitelist=0.0.0.0/0
+    depends_on:
+      - dgraph-zero
+
+  dgraph-ratel:
+    image: dgraph/ratel:latest
+    container_name: pocw-dgraph-ratel
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    networks:
+      - pocw-network
+    depends_on:
+      - dgraph-alpha
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: pocw-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - pocw-network
+    command: redis-server --appendonly yes
+
+  # ============================================
+  # Core Business Services
+  # ============================================
+
+  # MinerGateway Service
+  miner-gateway:
+    build:
+      context: .
+      dockerfile: services/miner-gateway/Dockerfile
+    container_name: pocw-miner-gateway
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=mysql://pocw_user:pocw_password@mysql:3306/pocw_db
+      - REDIS_URL=redis://redis:6379
+      - DGRAPH_URL=dgraph-alpha:9080
+      - TWITTER_MIDDLE_LAYER_URL=${TWITTER_MIDDLE_LAYER_URL}
+      - TWITTER_API_KEY=${TWITTER_API_KEY}
+      - MINER_PRIVATE_KEY=${MINER_PRIVATE_KEY}
+      - VALIDATOR_ENDPOINTS=${VALIDATOR_ENDPOINTS}
+      - POINTS_SERVICE_URL=http://points-service:8080
+      - LOG_LEVEL=info
+    ports:
+      - "8081:8080"
+    networks:
+      - pocw-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      dgraph-alpha:
+        condition: service_started
+      points-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # UI Validator Service
+  validator-ui:
+    build:
+      context: .
+      dockerfile: services/validator/Dockerfile
+    container_name: pocw-validator-ui
+    restart: unless-stopped
+    environment:
+      - VALIDATOR_ID=validator-1
+      - VALIDATOR_ROLE=ui_validator
+      - VALIDATOR_WEIGHT=0.40
+      - VALIDATOR_PRIVATE_KEY=${VALIDATOR_1_PRIVATE_KEY}
+      - DATABASE_URL=mysql://pocw_user:pocw_password@mysql:3306/pocw_db
+      - DGRAPH_URL=dgraph-alpha:9080
+      - LOG_LEVEL=info
+    ports:
+      - "8082:8080"
+    networks:
+      - pocw-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+      dgraph-alpha:
+        condition: service_started
+
+  # Format Validator Service #1
+  validator-format-1:
+    build:
+      context: .
+      dockerfile: services/validator/Dockerfile
+    container_name: pocw-validator-format-1
+    restart: unless-stopped
+    environment:
+      - VALIDATOR_ID=validator-2
+      - VALIDATOR_ROLE=format_validator
+      - VALIDATOR_WEIGHT=0.20
+      - VALIDATOR_PRIVATE_KEY=${VALIDATOR_2_PRIVATE_KEY}
+      - DATABASE_URL=mysql://pocw_user:pocw_password@mysql:3306/pocw_db
+      - DGRAPH_URL=dgraph-alpha:9080
+      - LOG_LEVEL=info
+    ports:
+      - "8083:8080"
+    networks:
+      - pocw-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+      dgraph-alpha:
+        condition: service_started
+
+  # Format Validator Service #2
+  validator-format-2:
+    build:
+      context: .
+      dockerfile: services/validator/Dockerfile
+    container_name: pocw-validator-format-2
+    restart: unless-stopped
+    environment:
+      - VALIDATOR_ID=validator-3
+      - VALIDATOR_ROLE=format_validator
+      - VALIDATOR_WEIGHT=0.20
+      - VALIDATOR_PRIVATE_KEY=${VALIDATOR_3_PRIVATE_KEY}
+      - DATABASE_URL=mysql://pocw_user:pocw_password@mysql:3306/pocw_db
+      - DGRAPH_URL=dgraph-alpha:9080
+      - LOG_LEVEL=info
+    ports:
+      - "8084:8080"
+    networks:
+      - pocw-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+      dgraph-alpha:
+        condition: service_started
+
+  # Semantic Validator Service
+  validator-semantic:
+    build:
+      context: .
+      dockerfile: services/validator/Dockerfile
+    container_name: pocw-validator-semantic
+    restart: unless-stopped
+    environment:
+      - VALIDATOR_ID=validator-4
+      - VALIDATOR_ROLE=semantic_validator
+      - VALIDATOR_WEIGHT=0.20
+      - VALIDATOR_PRIVATE_KEY=${VALIDATOR_4_PRIVATE_KEY}
+      - DATABASE_URL=mysql://pocw_user:pocw_password@mysql:3306/pocw_db
+      - DGRAPH_URL=dgraph-alpha:9080
+      - LOG_LEVEL=info
+    ports:
+      - "8085:8080"
+    networks:
+      - pocw-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+      dgraph-alpha:
+        condition: service_started
+
+  # Points Service
+  points-service:
+    build:
+      context: .
+      dockerfile: services/points-service/Dockerfile
+    container_name: pocw-points-service
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=mysql://pocw_user:pocw_password@mysql:3306/pocw_db
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=pocw_user
+      - DB_PASSWORD=pocw_password
+      - DB_NAME=pocw_db
+      - POINTS_TOTAL_POOL=100
+      - POINTS_CREATION_RATIO=0.4
+      - POINTS_RETWEET_RATIO=0.6
+      - POINTS_HISTORY_LIMIT=1000
+      - LOG_LEVEL=info
+    ports:
+      - "8087:8080"
+    networks:
+      - pocw-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # SBT Service
+  sbt-service:
+    build:
+      context: .
+      dockerfile: services/sbt-service/Dockerfile
+    container_name: pocw-sbt-service
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=mysql://pocw_user:pocw_password@mysql:3306/pocw_db
+      - PINATA_API_KEY=${PINATA_API_KEY}
+      - PINATA_SECRET_KEY=${PINATA_SECRET_KEY}
+      - BASE_URL=${SBT_SERVICE_BASE_URL:-http://localhost:8086}
+      - CONTRACT_ADDRESS=${SBT_CONTRACT_ADDRESS}
+      - CONTRACT_PRIVATE_KEY=${SBT_CONTRACT_PRIVATE_KEY}
+      - POINTS_SERVICE_URL=http://points-service:8080
+      - LOG_LEVEL=info
+    ports:
+      - "8086:8080"
+    networks:
+      - pocw-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+      points-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # Aggregation & Monitoring Services
+  # ============================================
+
+  # Consensus Aggregator Service
+  aggregator:
+    build:
+      context: .
+      dockerfile: services/aggregator/Dockerfile
+    container_name: pocw-aggregator
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=mysql://pocw_user:pocw_password@mysql:3306/pocw_db
+      - DGRAPH_URL=dgraph-alpha:9080
+      - BLOCKCHAIN_RPC_URL=${BLOCKCHAIN_RPC_URL}
+      - BRIDGE_SERVICE_URL=${BRIDGE_SERVICE_URL}
+      - AGGREGATOR_PRIVATE_KEY=${AGGREGATOR_PRIVATE_KEY}
+      - LOG_LEVEL=info
+    ports:
+      - "8088:8080"
+    networks:
+      - pocw-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+      dgraph-alpha:
+        condition: service_started
+
+  # Monitoring Service
+  monitoring:
+    build:
+      context: .
+      dockerfile: services/monitoring/Dockerfile
+    container_name: pocw-monitoring
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=mysql://pocw_user:pocw_password@mysql:3306/pocw_db
+      - SERVICES_CONFIG=/app/config/services.yaml
+    ports:
+      - "8089:8080"
+    networks:
+      - pocw-network
+    volumes:
+      - ./config/monitoring:/app/config
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  # ============================================
+  # Blockchain Bridge Services
+  # ============================================
+
+  # Blockchain Bridge Service
+  blockchain-bridge:
+    build:
+      context: .
+      dockerfile: services/bridge/Dockerfile
+    container_name: pocw-blockchain-bridge
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - BLOCKCHAIN_RPC_URL=${BLOCKCHAIN_RPC_URL}
+      - CONTRACT_ADDRESS=${POCW_CONTRACT_ADDRESS}
+      - PRIVATE_KEY=${BRIDGE_PRIVATE_KEY}
+      - WEBHOOK_URL=${BRIDGE_WEBHOOK_URL}
+    ports:
+      - "3000:3000"
+    networks:
+      - pocw-network
+
+  # ============================================
+  # Development & Debugging Tools
+  # ============================================
+
+  # phpMyAdmin (optional, for database management)
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    container_name: pocw-phpmyadmin
+    restart: unless-stopped
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_USER: root
+      PMA_PASSWORD: ${MYSQL_ROOT_PASSWORD:-pocw_root_password}
+    ports:
+      - "8089:80"
+    networks:
+      - pocw-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+    profiles:
+      - debug
+
+  # Redis Commander (optional, for Redis management)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: pocw-redis-commander
+    restart: unless-stopped
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "8090:8081"
+    networks:
+      - pocw-network
+    depends_on:
+      - redis
+    profiles:
+      - debug
+
+# ============================================
+# Network & Storage Configuration
+# ============================================
+
+networks:
+  pocw-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  mysql_data:
+    driver: local
+  dgraph_zero_data:
+    driver: local
+  dgraph_alpha_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# ============================================
+# Extension Configuration
+# ============================================
+
+# Production logging profile
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# Resource-limit template
+x-resources: &default-resources
+  deploy:
+    resources:
+      limits:
+        memory: 512M
+      reservations:
+        memory: 256M
