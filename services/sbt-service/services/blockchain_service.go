@@ -137,7 +137,7 @@ func (bs *BlockchainService) MintSBT(ctx context.Context, toAddress, displayName
 
 	// Call contract
 	boundContract := bind.NewBoundContract(bs.contractAddress, bs.contractABI, bs.client, bs.client, bs.client)
-	transaction, err := boundContract.Transact(tx, "mintSBT", userAddr, tokenURI)
+	transaction, err := boundContract.Transact(tx, "mintSBT", userAddr, displayName, inviterAddr, tokenURI)
 	if err != nil {
 		return nil, fmt.Errorf("failed to mint SBT: %v", err)
 	}
