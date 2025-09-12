@@ -10,6 +10,9 @@ WORKDIR /app
 # Copy go mod files
 COPY go.mod go.sum ./
 
+# Copy pkg directory first (needed for local replace)
+COPY pkg/ ./pkg/
+
 # Download dependencies
 RUN go mod download
 
