@@ -84,14 +84,15 @@ validate_env() {
     
     # Check for placeholder values that need to be replaced
     local placeholders=(
-        "REPLACE_WITH_SECURE_ROOT_PASSWORD"
-        "REPLACE_WITH_SECURE_DB_PASSWORD"
-        "REPLACE_WITH_YOUR_PINATA_API_KEY"
-        "REPLACE_WITH_YOUR_PINATA_SECRET_KEY"
-        "REPLACE_WITH_YOUR_TWITTER_API_KEY"
-        "REPLACE_WITH_YOUR_BLOCKCHAIN_RPC_URL"
-        "REPLACE_WITH_MINER_PRIVATE_KEY"
-        "REPLACE_WITH_SBT_CONTRACT_PRIVATE_KEY"
+        "your_secure_root_password"
+        "your_secure_db_password"
+        "your_pinata_api_key"
+        "your_pinata_secret_key"
+        "your_twitter_api_key"
+        "your_project_id"
+        "your_deployed_sbt_contract_address"
+        "your_sbt_contract_private_key"
+        "your-twitter-middleware.com"
     )
     
     local has_placeholders=false
@@ -133,15 +134,16 @@ show_env_status() {
             "MYSQL_ROOT_PASSWORD"
             "PINATA_API_KEY"
             "TWITTER_API_KEY"
-            "BLOCKCHAIN_RPC_URL"
+            "ETH_RPC_URL"
+            "SBT_CONTRACT_ADDRESS"
             "MINER_PRIVATE_KEY"
         )
         
         echo "   Required variables status:"
         for var in "${required_vars[@]}"; do
-            if grep -q "^$var=" .env && ! grep -q "^$var=REPLACE_" .env; then
+            if grep -q "^$var=" .env && ! grep -q "^$var=your_" .env; then
                 echo "     ✅ $var: configured"
-            elif grep -q "^$var=REPLACE_" .env; then
+            elif grep -q "^$var=your_" .env; then
                 echo "     ⚠️  $var: needs configuration"
             else
                 echo "     ❌ $var: missing"
@@ -151,13 +153,13 @@ show_env_status() {
     else
         log_warning ".env file does not exist"
         
-        # Check for available templates
-        echo "   Available templates:"
-        for template in env.template env.example; do
-            if [ -f "$template" ]; then
-                echo "     📄 $template"
-            fi
-        done
+        # Check for available template
+        echo "   Available template:"
+        if [ -f "env.example" ]; then
+            echo "     📄 env.example"
+        else
+            echo "     ❌ No template found"
+        fi
     fi
     
     echo
@@ -181,23 +183,11 @@ interactive_setup() {
         backup_env
     fi
     
-    # Choose template
-    local template="env.template"
-    if [ -f "env.example" ] && [ -f "env.template" ]; then
-        echo
-        echo "📄 Available templates:"
-        echo "   1) env.template (secure template with placeholders)"
-        echo "   2) env.example (example with sample values)"
-        echo
-        read -p "❓ Choose template (1-2): " -n 1 -r
-        echo
-        case $REPLY in
-            1) template="env.template" ;;
-            2) template="env.example" ;;
-            *) template="env.template" ;;
-        esac
-    elif [ -f "env.example" ]; then
-        template="env.example"
+    # Use the only available template
+    local template="env.example"
+    if [ ! -f "env.example" ]; then
+        log_error "env.example template not found"
+        return 1
     fi
     
     create_env_from_template "$template"
@@ -226,7 +216,7 @@ main() {
             if [ -n "$2" ]; then
                 create_env_from_template "$2"
             else
-                create_env_from_template "env.template"
+                create_env_from_template "env.example"
             fi
             ;;
         "backup")
@@ -248,7 +238,7 @@ main() {
             echo "Usage: $0 <command> [options]"
             echo
             echo "Commands:"
-            echo "  create [template]    Create .env from template (default: env.template)"
+            echo "  create [template]    Create .env from template (default: env.example)"
             echo "  backup              Backup existing .env file"
             echo "  validate            Validate .env configuration"
             echo "  status              Show .env status"
@@ -256,7 +246,7 @@ main() {
             echo "  help                Show this help message"
             echo
             echo "Examples:"
-            echo "  $0 create                    # Create from env.template"
+            echo "  $0 create                    # Create from env.example"
             echo "  $0 create env.example        # Create from env.example"
             echo "  $0 interactive               # Run setup wizard"
             echo "  $0 validate                  # Check configuration"

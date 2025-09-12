@@ -988,9 +988,9 @@ func parseContractABI() (abi.ABI, error) {
 
 // setupDefaultSigner sets up default signer
 func setupDefaultSigner(client *ethclient.Client) (*bind.TransactOpts, error) {
-	privateKeyHex := os.Getenv("DEFAULT_SIGNER_PRIVATE_KEY")
+	privateKeyHex := os.Getenv("SBT_CONTRACT_PRIVATE_KEY")
 	if privateKeyHex == "" {
-		return nil, fmt.Errorf("DEFAULT_SIGNER_PRIVATE_KEY environment variable is required")
+		return nil, fmt.Errorf("SBT_CONTRACT_PRIVATE_KEY environment variable is required")
 	}
 
 	// Remove 0x prefix
