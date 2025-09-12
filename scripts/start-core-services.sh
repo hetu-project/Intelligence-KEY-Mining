@@ -34,6 +34,35 @@ log_service() {
     echo -e "${PURPLE}[SERVICE]${NC} $1"
 }
 
+# Check and install dependencies
+check_dependencies() {
+    log_info "Checking required dependencies..."
+    
+    # Check if mysql client is installed
+    if ! command -v mysql &> /dev/null; then
+        log_warning "MySQL client not found, attempting to install..."
+        if command -v apt-get &> /dev/null; then
+            sudo apt-get update && sudo apt-get install -y mysql-client
+        elif command -v yum &> /dev/null; then
+            sudo yum install -y mysql
+        else
+            log_error "Cannot install mysql-client automatically. Please install it manually:"
+            log_error "  Ubuntu/Debian: apt-get install -y mysql-client"
+            log_error "  CentOS/RHEL: yum install -y mysql"
+            return 1
+        fi
+    fi
+    
+    # Check if docker-compose is installed
+    if ! command -v docker-compose &> /dev/null; then
+        log_error "docker-compose not found. Please install docker-compose first."
+        return 1
+    fi
+    
+    log_success "All dependencies are available"
+    return 0
+}
+
 # Check environment file
 check_env_file() {
     log_info "Checking environment configuration..."

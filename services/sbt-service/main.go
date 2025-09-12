@@ -13,7 +13,6 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/go-sql-driver/mysql"
 	_ "github.com/go-sql-driver/mysql"
 
 	"github.com/hetu-project/Intelligence-KEY-Mining/services/sbt-service/handlers"
@@ -111,18 +110,8 @@ func main() {
 
 // connectDatabase connects to database
 func connectDatabase(databaseURL string) (*sql.DB, error) {
-	// Parse database URL: mysql://user:password@host:port/database
-	cfg, err := mysql.ParseDSN(databaseURL[8:]) // Remove "mysql://" prefix
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse database URL: %v", err)
-	}
-
-	// Set connection parameters
-	cfg.ParseTime = true
-	cfg.Loc = time.UTC
-
-	// Connect to database
-	db, err := sql.Open("mysql", cfg.FormatDSN())
+	// Connect to database using DSN format directly
+	db, err := sql.Open("mysql", databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %v", err)
 	}

@@ -92,7 +92,7 @@ services:
     container_name: pocw-miner-gateway
     restart: unless-stopped
     environment:
-      - DATABASE_URL=mysql://pocw_user:pocw_password@mysql:3306/pocw_db
+      - DATABASE_URL=pocw_user:pocw_password@tcp(mysql:3306)/pocw_db?parseTime=true&loc=UTC
       - REDIS_URL=redis://redis:6379
       - DGRAPH_URL=dgraph-alpha:9080
       - TWITTER_MIDDLE_LAYER_URL=${TWITTER_MIDDLE_LAYER_URL}
@@ -132,7 +132,7 @@ services:
       - VALIDATOR_ROLE=ui_validator
       - VALIDATOR_WEIGHT=0.40
       - VALIDATOR_PRIVATE_KEY=${VALIDATOR_1_PRIVATE_KEY}
-      - DATABASE_URL=mysql://pocw_user:pocw_password@mysql:3306/pocw_db
+      - DATABASE_URL=pocw_user:pocw_password@tcp(mysql:3306)/pocw_db?parseTime=true&loc=UTC
       - DGRAPH_URL=dgraph-alpha:9080
       - LOG_LEVEL=info
     ports:
@@ -157,7 +157,7 @@ services:
       - VALIDATOR_ROLE=format_validator
       - VALIDATOR_WEIGHT=0.20
       - VALIDATOR_PRIVATE_KEY=${VALIDATOR_2_PRIVATE_KEY}
-      - DATABASE_URL=mysql://pocw_user:pocw_password@mysql:3306/pocw_db
+      - DATABASE_URL=pocw_user:pocw_password@tcp(mysql:3306)/pocw_db?parseTime=true&loc=UTC
       - DGRAPH_URL=dgraph-alpha:9080
       - LOG_LEVEL=info
     ports:
@@ -182,7 +182,7 @@ services:
       - VALIDATOR_ROLE=format_validator
       - VALIDATOR_WEIGHT=0.20
       - VALIDATOR_PRIVATE_KEY=${VALIDATOR_3_PRIVATE_KEY}
-      - DATABASE_URL=mysql://pocw_user:pocw_password@mysql:3306/pocw_db
+      - DATABASE_URL=pocw_user:pocw_password@tcp(mysql:3306)/pocw_db?parseTime=true&loc=UTC
       - DGRAPH_URL=dgraph-alpha:9080
       - LOG_LEVEL=info
     ports:
@@ -207,7 +207,7 @@ services:
       - VALIDATOR_ROLE=semantic_validator
       - VALIDATOR_WEIGHT=0.20
       - VALIDATOR_PRIVATE_KEY=${VALIDATOR_4_PRIVATE_KEY}
-      - DATABASE_URL=mysql://pocw_user:pocw_password@mysql:3306/pocw_db
+      - DATABASE_URL=pocw_user:pocw_password@tcp(mysql:3306)/pocw_db?parseTime=true&loc=UTC
       - DGRAPH_URL=dgraph-alpha:9080
       - LOG_LEVEL=info
     ports:
@@ -228,7 +228,7 @@ services:
     container_name: pocw-points-service
     restart: unless-stopped
     environment:
-      - DATABASE_URL=mysql://pocw_user:pocw_password@mysql:3306/pocw_db
+      - DATABASE_URL=pocw_user:pocw_password@tcp(mysql:3306)/pocw_db?parseTime=true&loc=UTC
       - DB_HOST=mysql
       - DB_PORT=3306
       - DB_USER=pocw_user
@@ -260,7 +260,7 @@ services:
     container_name: pocw-sbt-service
     restart: unless-stopped
     environment:
-      - DATABASE_URL=mysql://pocw_user:pocw_password@mysql:3306/pocw_db
+      - DATABASE_URL=pocw_user:pocw_password@tcp(mysql:3306)/pocw_db?parseTime=true&loc=UTC
       - PINATA_API_KEY=${PINATA_API_KEY}
       - PINATA_SECRET_KEY=${PINATA_SECRET_KEY}
       - BASE_URL=${SBT_SERVICE_BASE_URL:-http://localhost:8086}
@@ -296,7 +296,7 @@ services:
     container_name: pocw-aggregator
     restart: unless-stopped
     environment:
-      - DATABASE_URL=mysql://pocw_user:pocw_password@mysql:3306/pocw_db
+      - DATABASE_URL=pocw_user:pocw_password@tcp(mysql:3306)/pocw_db?parseTime=true&loc=UTC
       - DGRAPH_URL=dgraph-alpha:9080
       - BLOCKCHAIN_RPC_URL=${BLOCKCHAIN_RPC_URL}
       - BRIDGE_SERVICE_URL=${BRIDGE_SERVICE_URL}
@@ -320,7 +320,7 @@ services:
     container_name: pocw-monitoring
     restart: unless-stopped
     environment:
-      - DATABASE_URL=mysql://pocw_user:pocw_password@mysql:3306/pocw_db
+      - DATABASE_URL=pocw_user:pocw_password@tcp(mysql:3306)/pocw_db?parseTime=true&loc=UTC
       - SERVICES_CONFIG=/app/config/services.yaml
     ports:
       - "8089:8080"
