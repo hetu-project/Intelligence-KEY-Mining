@@ -81,7 +81,7 @@ func (bs *BlockchainService) CheckContractDeployed(ctx context.Context) error {
 }
 
 // MintSBT mints an SBT token
-func (bs *BlockchainService) MintSBT(ctx context.Context, toAddress, tokenURI string) (*big.Int, error) {
+func (bs *BlockchainService) MintSBT(ctx context.Context, toAddress, displayName, inviterAddress, tokenURI string) (*big.Int, error) {
 	// Check user balance
 	userAddr := common.HexToAddress(toAddress)
 	balance, err := bs.client.BalanceAt(ctx, userAddr, nil)
@@ -110,8 +110,11 @@ func (bs *BlockchainService) MintSBT(ctx context.Context, toAddress, tokenURI st
 		signer = bs.defaultSigner
 	}
 
+	// Parse addresses
+	inviterAddr := common.HexToAddress(inviterAddress)
+
 	// Prepare contract call data
-	_, err = bs.contractABI.Pack("mintSBT", userAddr, tokenURI)
+	_, err = bs.contractABI.Pack("mintSBT", userAddr, displayName, inviterAddr, tokenURI)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pack contract call: %v", err)
 	}

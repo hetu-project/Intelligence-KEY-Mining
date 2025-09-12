@@ -68,7 +68,11 @@ func (h *SBTHandler) RegisterUser(c *gin.Context) {
 	}
 
 	// Call blockchain to mint SBT
-	tokenId, err := h.blockchainService.MintSBT(c.Request.Context(), req.WalletAddress, response.TokenURI)
+	inviterAddress := req.InviteFrom
+	if inviterAddress == "" {
+		inviterAddress = "0x0000000000000000000000000000000000000000" // Zero address if no inviter
+	}
+	tokenId, err := h.blockchainService.MintSBT(c.Request.Context(), req.WalletAddress, req.DisplayName, inviterAddress, response.TokenURI)
 	if err != nil {
 		// Minting failed, but metadata already generated, log error but don't affect response
 		// In production environment, may need to rollback metadata or implement retry mechanism
