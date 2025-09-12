@@ -223,8 +223,12 @@ run_migrations() {
     
     if [ -f "scripts/database/migrate.sh" ]; then
         chmod +x scripts/database/migrate.sh
-        ./scripts/database/migrate.sh
-        log_success "Database migrations completed"
+        if ./scripts/database/migrate.sh; then
+            log_success "Database migrations completed"
+        else
+            log_warning "Database migrations failed, continuing without migrations..."
+            log_warning "You may need to run migrations manually later"
+        fi
     else
         log_warning "No migration script found, skipping..."
     fi
