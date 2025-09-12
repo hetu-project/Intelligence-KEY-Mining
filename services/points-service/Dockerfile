@@ -7,8 +7,8 @@ WORKDIR /app
 # Install required packages
 RUN apk add --no-cache git ca-certificates
 
-# Copy go mod files
-COPY go.mod go.sum ./
+# Copy points-service specific go mod files
+COPY services/points-service/go.mod services/points-service/go.sum ./
 
 # Copy pkg directory first (needed for local replace)
 COPY pkg/ ./pkg/
@@ -16,11 +16,11 @@ COPY pkg/ ./pkg/
 # Download dependencies
 RUN go mod download
 
-# Copy source code
-COPY . .
+# Copy points-service source code
+COPY services/points-service/ ./
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o points-service ./services/points-service/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o points-service main.go
 
 # Runtime stage
 FROM alpine:latest

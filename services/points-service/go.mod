@@ -7,7 +7,7 @@ require (
 	github.com/go-sql-driver/mysql v1.7.1
 )
 
-replace github.com/hetu-project/Intelligence-KEY-Mining/pkg/points => ../../pkg/points
+replace github.com/hetu-project/Intelligence-KEY-Mining/pkg/points => ./pkg/points
 
 require (
 	github.com/bytedance/sonic v1.9.1 // indirect
