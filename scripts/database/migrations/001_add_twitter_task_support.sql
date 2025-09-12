@@ -6,9 +6,29 @@
 -- 1. Update tasks table to support new task types
 -- ============================================
 
--- Add indexes for new task types
-ALTER TABLE tasks ADD INDEX idx_task_type_status (task_type, status);
-ALTER TABLE tasks ADD INDEX idx_user_wallet_task_type (user_wallet, task_type);
+-- Add indexes for new task types (skip if already exists)
+-- Note: MySQL doesn't support IF NOT EXISTS for ALTER TABLE ADD INDEX
+-- So we'll use a different approach or skip if already exists
+
+-- Check and add idx_task_type_status
+SET @sql = IF((SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS 
+              WHERE table_schema = 'pocw_db' AND table_name = 'tasks' 
+              AND index_name = 'idx_task_type_status') = 0,
+              'ALTER TABLE tasks ADD INDEX idx_task_type_status (task_type, status)',
+              'SELECT "Index idx_task_type_status already exists" as message');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- Check and add idx_user_wallet_task_type  
+SET @sql = IF((SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS 
+              WHERE table_schema = 'pocw_db' AND table_name = 'tasks' 
+              AND index_name = 'idx_user_wallet_task_type') = 0,
+              'ALTER TABLE tasks ADD INDEX idx_user_wallet_task_type (user_wallet, task_type)',
+              'SELECT "Index idx_user_wallet_task_type already exists" as message');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- ============================================
 -- 2. Create Twitter-task-related tables
