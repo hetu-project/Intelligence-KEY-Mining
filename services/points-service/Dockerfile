@@ -25,8 +25,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o points-service ma
 # Runtime stage
 FROM alpine:latest
 
-# Install ca-certificates
-RUN apk --no-cache add ca-certificates
+# Install ca-certificates and curl for health check
+RUN apk --no-cache add ca-certificates curl
 
 WORKDIR /root/
 
