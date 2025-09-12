@@ -40,12 +40,16 @@ dashboard.log
 .vscode/
 .idea/
 
-# Environment files
+# Environment files (NEVER commit these)
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+.env.backup.*
+.env.*
+!env.template
+!env.example
 
 # Coverage reports
 *.cover

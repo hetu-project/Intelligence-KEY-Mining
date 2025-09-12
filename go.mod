@@ -2,6 +2,8 @@ module github.com/hetu-project/Intelligence-KEY-Mining
 
 go 1.21
 
+replace github.com/hetu-project/Intelligence-KEY-Mining/pkg/points => ./pkg/points
+
 require (
 	github.com/dgraph-io/dgo/v210 v210.0.0-20230328113526-b66f8ae53a2d
 	github.com/ethereum/go-ethereum v1.13.5
@@ -9,6 +11,7 @@ require (
 	github.com/gin-gonic/gin v1.9.1
 	github.com/go-sql-driver/mysql v1.7.1
 	github.com/google/uuid v1.3.1
+	github.com/hetu-project/Intelligence-KEY-Mining/pkg/points v0.0.0-00010101000000-000000000000
 	google.golang.org/grpc v1.58.3
 )
 
