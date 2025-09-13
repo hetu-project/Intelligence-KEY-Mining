@@ -94,7 +94,13 @@ func (bs *BlockchainService) MintSBT(ctx context.Context, toAddress, displayName
 	// Check if user already has SBT
 	boundContract := bind.NewBoundContract(bs.contractAddress, bs.contractABI, bs.client, bs.client, bs.client)
 	var existingTokenId *big.Int
-	err := boundContract.Call(nil, &existingTokenId, "userToTokenId", userAddr)
+	var results []interface{}
+	err := boundContract.Call(nil, &results, "userToTokenId", userAddr)
+	if err == nil && len(results) > 0 {
+		if tokenId, ok := results[0].(*big.Int); ok {
+			existingTokenId = tokenId
+		}
+	}
 	if err != nil {
 		log.Printf("⚠️  Warning: Could not check existing token ID: %v", err)
 	} else {
@@ -110,7 +116,13 @@ func (bs *BlockchainService) MintSBT(ctx context.Context, toAddress, displayName
 
 	// Check if signer is owner
 	var owner common.Address
-	err = boundContract.Call(nil, &owner, "owner")
+	var ownerResults []interface{}
+	err = boundContract.Call(nil, &ownerResults, "owner")
+	if err == nil && len(ownerResults) > 0 {
+		if addr, ok := ownerResults[0].(common.Address); ok {
+			owner = addr
+		}
+	}
 	if err != nil {
 		log.Printf("⚠️  Warning: Could not check contract owner: %v", err)
 	} else {
@@ -119,7 +131,13 @@ func (bs *BlockchainService) MintSBT(ctx context.Context, toAddress, displayName
 	}
 
 	// Check if signer is authorized minter
-	err = boundContract.Call(nil, &isAuthorizedMinter, "authorizedMinters", bs.defaultSigner.From)
+	var minterResults []interface{}
+	err = boundContract.Call(nil, &minterResults, "authorizedMinters", bs.defaultSigner.From)
+	if err == nil && len(minterResults) > 0 {
+		if authorized, ok := minterResults[0].(bool); ok {
+			isAuthorizedMinter = authorized
+		}
+	}
 	if err != nil {
 		log.Printf("⚠️  Warning: Could not check minter authorization: %v", err)
 	} else {
