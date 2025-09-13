@@ -1,6 +1,7 @@
 package models
 
 import (
+	"database/sql"
 	"time"
 )
 
@@ -90,10 +91,11 @@ type UserProfile struct {
 	SubnetNFTs []SubnetNFT  `json:"subnet_nfts"`
 
 	// SBT information
-	TokenURI string `json:"token_uri" db:"token_uri"`
-	TokenID  int64  `json:"token_id" db:"token_id"`
-	ImageURI string `json:"image_uri" db:"image_uri"`
-	IPFSHash string `json:"ipfs_hash" db:"ipfs_hash"`
+	TokenURI     string        `json:"token_uri" db:"token_uri"`
+	TokenID      sql.NullInt64 `json:"-" db:"token_id"`
+	TokenIDValue int64         `json:"token_id"`
+	ImageURI     string        `json:"image_uri" db:"image_uri"`
+	IPFSHash     string        `json:"ipfs_hash" db:"ipfs_hash"`
 
 	// Timestamps
 	CreatedAt time.Time `json:"created_at" db:"created_at"`

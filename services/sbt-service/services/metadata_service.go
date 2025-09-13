@@ -306,6 +306,13 @@ func (ms *MetadataService) getUserProfile(ctx context.Context, walletAddress str
 		profile.Inviter = inviter.String
 	}
 
+	// Handle TokenID conversion
+	if profile.TokenID.Valid {
+		profile.TokenIDValue = profile.TokenID.Int64
+	} else {
+		profile.TokenIDValue = 0
+	}
+
 	// Parse JSON field
 	if subnetsJSON.Valid {
 		json.Unmarshal([]byte(subnetsJSON.String), &profile.Subnets)
