@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -82,19 +83,96 @@ func (bs *BlockchainService) CheckContractDeployed(ctx context.Context) error {
 
 // MintSBT mints an SBT token
 func (bs *BlockchainService) MintSBT(ctx context.Context, toAddress, displayName, inviterAddress, tokenURI string) (*big.Int, error) {
+	log.Printf("🔄 Attempting to mint SBT for address: %s", toAddress)
+	log.Printf("📝 Display name: %s", displayName)
+	log.Printf("👥 Inviter address: %s", inviterAddress)
+	log.Printf("🔗 Token URI: %s", tokenURI)
+
 	// Check user balance
 	userAddr := common.HexToAddress(toAddress)
+
+	// Check if user already has SBT
+	boundContract := bind.NewBoundContract(bs.contractAddress, bs.contractABI, bs.client, bs.client, bs.client)
+	var existingTokenId *big.Int
+	err := boundContract.Call(nil, &existingTokenId, "userToTokenId", userAddr)
+	if err != nil {
+		log.Printf("⚠️  Warning: Could not check existing token ID: %v", err)
+	} else {
+		log.Printf("🔍 Existing token ID for user: %s", existingTokenId.String())
+		if existingTokenId.Cmp(big.NewInt(0)) > 0 {
+			return nil, fmt.Errorf("user already has SBT with token ID: %s", existingTokenId.String())
+		}
+	}
+
+	// Check if signer is authorized
+	var isOwner bool
+	var isAuthorizedMinter bool
+
+	// Check if signer is owner
+	var owner common.Address
+	err = boundContract.Call(nil, &owner, "owner")
+	if err != nil {
+		log.Printf("⚠️  Warning: Could not check contract owner: %v", err)
+	} else {
+		isOwner = (bs.defaultSigner.From == owner)
+		log.Printf("🔑 Contract owner: %s, Signer: %s, Is owner: %v", owner.Hex(), bs.defaultSigner.From.Hex(), isOwner)
+	}
+
+	// Check if signer is authorized minter
+	err = boundContract.Call(nil, &isAuthorizedMinter, "authorizedMinters", bs.defaultSigner.From)
+	if err != nil {
+		log.Printf("⚠️  Warning: Could not check minter authorization: %v", err)
+	} else {
+		log.Printf("🔐 Is authorized minter: %v", isAuthorizedMinter)
+	}
+
+	if !isOwner && !isAuthorizedMinter {
+		return nil, fmt.Errorf("signer address %s is not authorized to mint SBTs (not owner and not authorized minter)", bs.defaultSigner.From.Hex())
+	}
+
+	// Validate parameters
+	if displayName == "" {
+		return nil, fmt.Errorf("display name cannot be empty")
+	}
+	if tokenURI == "" {
+		return nil, fmt.Errorf("token URI cannot be empty")
+	}
 	balance, err := bs.client.BalanceAt(ctx, userAddr, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user balance: %v", err)
 	}
 
-	// Estimate gas cost
-	gasLimit := uint64(200000) // Estimated gas limit
+	// Estimate gas needed for this transaction
+	inviterAddr := common.HexToAddress(inviterAddress)
+	callData, err := bs.contractABI.Pack("mintSBT", userAddr, displayName, inviterAddr, tokenURI)
+	if err != nil {
+		return nil, fmt.Errorf("failed to pack call data: %v", err)
+	}
+
+	estimateMsg := ethereum.CallMsg{
+		From: bs.defaultSigner.From,
+		To:   &bs.contractAddress,
+		Data: callData,
+	}
+
+	gasLimit, err := bs.client.EstimateGas(ctx, estimateMsg)
+	if err != nil {
+		log.Printf("⚠️  Gas estimation failed, using default: %v", err)
+		gasLimit = uint64(500000) // Fallback to high limit
+	} else {
+		// Add 20% buffer to estimated gas
+		gasLimit = gasLimit * 120 / 100
+		log.Printf("⛽ Estimated gas: %d (with 20%% buffer)", gasLimit)
+	}
+
 	gasPrice, err := bs.client.SuggestGasPrice(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get gas price: %v", err)
 	}
+
+	// Increase gas price by 20% to ensure faster confirmation
+	gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(120))
+	gasPrice = new(big.Int).Div(gasPrice, big.NewInt(100))
 
 	estimatedCost := new(big.Int).Mul(gasPrice, big.NewInt(int64(gasLimit)))
 
@@ -110,14 +188,7 @@ func (bs *BlockchainService) MintSBT(ctx context.Context, toAddress, displayName
 		signer = bs.defaultSigner
 	}
 
-	// Parse addresses
-	inviterAddr := common.HexToAddress(inviterAddress)
-
-	// Prepare contract call data
-	_, err = bs.contractABI.Pack("mintSBT", userAddr, displayName, inviterAddr, tokenURI)
-	if err != nil {
-		return nil, fmt.Errorf("failed to pack contract call: %v", err)
-	}
+	// Contract call data already prepared in gas estimation above
 
 	// Create transaction
 	nonce, err := bs.client.PendingNonceAt(ctx, signer.From)
@@ -136,22 +207,46 @@ func (bs *BlockchainService) MintSBT(ctx context.Context, toAddress, displayName
 	}
 
 	// Call contract
-	boundContract := bind.NewBoundContract(bs.contractAddress, bs.contractABI, bs.client, bs.client, bs.client)
+	boundContract = bind.NewBoundContract(bs.contractAddress, bs.contractABI, bs.client, bs.client, bs.client)
+	log.Printf("🚀 Calling mintSBT with gas limit: %d, gas price: %s", gasLimit, gasPrice.String())
+	log.Printf("💰 Signer address: %s", tx.From.Hex())
+
 	transaction, err := boundContract.Transact(tx, "mintSBT", userAddr, displayName, inviterAddr, tokenURI)
 	if err != nil {
+		log.Printf("❌ Contract call failed: %v", err)
 		return nil, fmt.Errorf("failed to mint SBT: %v", err)
 	}
 
 	log.Printf("SBT minting transaction sent: %s", transaction.Hash().Hex())
 
-	// Wait for transaction confirmation
-	receipt, err := bind.WaitMined(ctx, bs.client, transaction)
+	// Wait for transaction confirmation with timeout
+	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second) // 30 second timeout
+	defer cancel()
+
+	receipt, err := bind.WaitMined(timeoutCtx, bs.client, transaction)
 	if err != nil {
+		if err == context.DeadlineExceeded {
+			log.Printf("⏰ Transaction timeout, but transaction was sent: %s", transaction.Hash().Hex())
+			log.Printf("💡 You can check transaction status manually on blockchain explorer")
+			// Return a special response indicating pending status
+			return big.NewInt(-1), fmt.Errorf("transaction sent but confirmation timeout: %s", transaction.Hash().Hex())
+		}
+		log.Printf("❌ Failed to wait for transaction: %v", err)
 		return nil, fmt.Errorf("failed to wait for transaction confirmation: %v", err)
 	}
 
+	log.Printf("📄 Transaction receipt: Block=%d, GasUsed=%d, Status=%d",
+		receipt.BlockNumber.Uint64(), receipt.GasUsed, receipt.Status)
+
 	if receipt.Status != 1 {
-		return nil, fmt.Errorf("transaction failed with status: %d", receipt.Status)
+		log.Printf("❌ Transaction failed! Gas used: %d, Gas limit: %d", receipt.GasUsed, gasLimit)
+
+		// Try to get revert reason from logs
+		if len(receipt.Logs) > 0 {
+			log.Printf("📋 Transaction logs: %v", receipt.Logs)
+		}
+
+		return nil, fmt.Errorf("transaction failed with status: %d (gas used: %d)", receipt.Status, receipt.GasUsed)
 	}
 
 	// Parse event to get tokenId
