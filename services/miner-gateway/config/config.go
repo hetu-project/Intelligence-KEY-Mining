@@ -5,21 +5,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/hetu-project/Intelligence-KEY-Mining/pkg/crypto"
 )
 
 // Config holds all configuration for the miner gateway service
 type Config struct {
-	Port                  string              `json:"port"`
-	DatabaseURL           string              `json:"database_url"`
-	RedisURL              string              `json:"redis_url"`
-	DgraphURL             string              `json:"dgraph_url"`
-	TwitterMiddleLayerURL string              `json:"twitter_middle_layer_url"`
-	TwitterAPIKey         string              `json:"twitter_api_key"`
-	MinerPrivateKey       *ecdsa.PrivateKey   `json:"-"`
-	ValidatorEndpoints    []ValidatorEndpoint `json:"validator_endpoints"`
-	LogLevel              string              `json:"log_level"`
+	Port                         string              `json:"port"`
+	DatabaseURL                  string              `json:"database_url"`
+	RedisURL                     string              `json:"redis_url"`
+	DgraphURL                    string              `json:"dgraph_url"`
+	TwitterMiddleLayerURL        string              `json:"twitter_middle_layer_url"`
+	TwitterAPIKey                string              `json:"twitter_api_key"`
+	TwitterRetweetCheckURL       string              `json:"twitter_retweet_check_url"`
+	MinerPrivateKey              *ecdsa.PrivateKey   `json:"-"`
+	ValidatorEndpoints           []ValidatorEndpoint `json:"validator_endpoints"`
+	LogLevel                     string              `json:"log_level"`
+	ValidatorPollIntervalSeconds int                 `json:"validator_poll_interval_seconds"`
 }
 
 // ValidatorEndpoint represents a validator service endpoint
@@ -33,14 +36,26 @@ type ValidatorEndpoint struct {
 
 // Load loads configuration from environment variables
 func Load() (*Config, error) {
+	// Parse poll interval from environment variable
+	pollIntervalStr := getEnv("VALIDATOR_POLL_INTERVAL_SECONDS", "7200") // 2 hours default
+	pollInterval, err := strconv.Atoi(pollIntervalStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid VALIDATOR_POLL_INTERVAL_SECONDS: %v", err)
+	}
+	if pollInterval <= 0 {
+		return nil, fmt.Errorf("VALIDATOR_POLL_INTERVAL_SECONDS must be positive, got: %d", pollInterval)
+	}
+
 	config := &Config{
-		Port:                  getEnv("PORT", "8080"),
-		DatabaseURL:           getEnv("DATABASE_URL", ""),
-		RedisURL:              getEnv("REDIS_URL", "redis://localhost:6379"),
-		DgraphURL:             getEnv("DGRAPH_URL", "localhost:9080"),
-		TwitterMiddleLayerURL: getEnv("TWITTER_MIDDLE_LAYER_URL", ""),
-		TwitterAPIKey:         getEnv("TWITTER_API_KEY", ""),
-		LogLevel:              getEnv("LOG_LEVEL", "info"),
+		Port:                         getEnv("PORT", "8080"),
+		DatabaseURL:                  getEnv("DATABASE_URL", ""),
+		RedisURL:                     getEnv("REDIS_URL", "redis://localhost:6379"),
+		DgraphURL:                    getEnv("DGRAPH_URL", "localhost:9080"),
+		TwitterMiddleLayerURL:        getEnv("TWITTER_MIDDLE_LAYER_URL", ""),
+		TwitterAPIKey:                getEnv("TWITTER_API_KEY", ""),
+		TwitterRetweetCheckURL:       getEnv("TWITTER_RETWEET_CHECK_URL", ""),
+		LogLevel:                     getEnv("LOG_LEVEL", "info"),
+		ValidatorPollIntervalSeconds: pollInterval,
 	}
 
 	// Load private key

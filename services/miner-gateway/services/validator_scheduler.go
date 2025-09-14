@@ -34,13 +34,15 @@ func NewValidatorScheduler(
 	taskService *TaskService,
 	taskCreationVerifier *verifiers.TaskCreationVerifier,
 	batchVerifier *BatchVerifier,
+	pollIntervalSeconds int,
 ) *ValidatorScheduler {
+	pollInterval := time.Duration(pollIntervalSeconds) * time.Second
 	return &ValidatorScheduler{
 		taskService:          taskService,
 		taskCreationVerifier: taskCreationVerifier,
 		batchVerifier:        batchVerifier,
-		pollInterval:         30 * time.Second, // Default poll every 30 seconds
-		batchSize:            50,               // Process 50 tasks each time
+		pollInterval:         pollInterval, // Use configurable interval
+		batchSize:            50,           // Process 50 tasks each time
 	}
 }
 
@@ -96,31 +98,22 @@ func (vs *ValidatorScheduler) schedulerLoop() {
 func (vs *ValidatorScheduler) processPendingTasks() {
 	ctx := vs.ctx
 
-	// Get pending task creation tasks for verification
+	// 1. Process task creation tasks (individual verification)
 	taskCreationTasks, err := vs.getTasksByTypeAndStatus(ctx, string(models.TaskCreationTask), "PENDING_VERIFICATION")
 	if err != nil {
 		log.Printf("Error fetching task creation tasks: %v", err)
 	} else if len(taskCreationTasks) > 0 {
-		log.Printf("Processing %d task creation tasks", len(taskCreationTasks))
+		log.Printf("Processing %d task creation tasks individually", len(taskCreationTasks))
 		vs.processTaskCreationTasks(ctx, taskCreationTasks)
 	}
 
-	// Get pending batch verification tasks for verification
-	batchTasks, err := vs.getTasksByTypeAndStatus(ctx, string(models.BatchVerificationTask), "SUBMITTED")
-	if err != nil {
-		log.Printf("Error fetching batch verification tasks: %v", err)
-	} else if len(batchTasks) > 0 {
-		log.Printf("Processing %d batch verification tasks", len(batchTasks))
-		vs.processBatchVerificationTasks(ctx, batchTasks)
-	}
-
-	// Get pending Twitter retweet tasks for verification
+	// 2. Batch verify Twitter retweet tasks (this is an operation, not a task type!)
 	twitterTasks, err := vs.getTasksByTypeAndStatus(ctx, "twitter_retweet", "PENDING_VERIFICATION")
 	if err != nil {
 		log.Printf("Error fetching twitter retweet tasks: %v", err)
 	} else if len(twitterTasks) > 0 {
-		log.Printf("Processing %d twitter retweet tasks", len(twitterTasks))
-		vs.processTwitterRetweetTasks(ctx, twitterTasks)
+		log.Printf("Batch verifying %d twitter retweet tasks", len(twitterTasks))
+		vs.batchVerifyTwitterTasks(ctx, twitterTasks)
 	}
 }
 
@@ -165,19 +158,19 @@ func (vs *ValidatorScheduler) processTaskCreationTasks(ctx context.Context, task
 	}
 }
 
-// processBatchVerificationTasks process tasks
-func (vs *ValidatorScheduler) processBatchVerificationTasks(ctx context.Context, tasks []*models.Task) {
-	for _, task := range tasks {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			if vs.batchVerifier != nil {
-				if err := vs.batchVerifier.SubmitTask(task); err != nil {
-					log.Printf("Error submitting batch verification task %s: %v", task.ID, err)
-				}
-			}
+// batchVerifyTwitterTasks performs batch verification of Twitter retweet tasks
+// This is an operation that processes multiple TwitterRetweetTask instances together
+func (vs *ValidatorScheduler) batchVerifyTwitterTasks(ctx context.Context, tasks []*models.Task) {
+	if vs.batchVerifier != nil {
+		// Create a batch verification operation
+		batchTask := vs.createBatchVerificationOperation(tasks)
+		if err := vs.batchVerifier.SubmitTask(batchTask); err != nil {
+			log.Printf("Error submitting batch verification operation: %v", err)
 		}
+	} else {
+		// Fallback: process each Twitter task individually
+		log.Printf("No batch verifier available, processing Twitter tasks individually")
+		vs.processTwitterRetweetTasks(ctx, tasks)
 	}
 }
 
@@ -230,6 +223,53 @@ func (vs *ValidatorScheduler) processTwitterRetweetTask(ctx context.Context, tas
 
 	proofJSON, _ := json.Marshal(proof)
 	return vs.taskService.updateTaskStatusWithProof(ctx, task.ID, status, proofJSON)
+}
+
+// createBatchVerificationOperation creates a batch verification operation from multiple Twitter tasks
+func (vs *ValidatorScheduler) createBatchVerificationOperation(twitterTasks []*models.Task) *models.Task {
+	// Create a synthetic batch operation task
+	batchTaskID := fmt.Sprintf("batch_%d_%d", time.Now().Unix(), len(twitterTasks))
+
+	// Extract task information for batch processing
+	taskInfos := make([]map[string]interface{}, 0, len(twitterTasks))
+	for _, task := range twitterTasks {
+		taskInfo := map[string]interface{}{
+			"task_id":     task.ID,
+			"user_wallet": task.UserWallet,
+			"tweet_id":    "", // Extract from payload if available
+			"twitter_id":  "", // Extract from payload if available
+		}
+
+		// Extract Twitter-specific data from payload
+		if tweetID, ok := task.Payload["tweet_id"].(string); ok {
+			taskInfo["tweet_id"] = tweetID
+		}
+		if twitterID, ok := task.Payload["twitter_id"].(string); ok {
+			taskInfo["twitter_id"] = twitterID
+		}
+
+		taskInfos = append(taskInfos, taskInfo)
+	}
+
+	// Create batch operation payload
+	batchPayload := map[string]interface{}{
+		"operation_type": "batch_twitter_verification",
+		"tasks":          taskInfos,
+		"batch_size":     len(twitterTasks),
+		"created_at":     time.Now().Format(time.RFC3339),
+	}
+
+	// Return a synthetic task representing the batch operation
+	return &models.Task{
+		ID:         batchTaskID,
+		UserWallet: "system",          // System operation
+		TaskType:   "batch_operation", // Not a real task type, just for internal use
+		Status:     models.TaskSubmitted,
+		Payload:    batchPayload,
+		Attempts:   0,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
 }
 
 // SetPollInterval set poll interval

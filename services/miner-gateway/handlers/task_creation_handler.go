@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/hetu-project/Intelligence-KEY-Mining/services/miner-gateway/models"
@@ -20,6 +22,18 @@ func NewTaskCreationHandler(taskService *services.TaskService) *TaskCreationHand
 	}
 }
 
+// parseIntParam parses an integer parameter with min/max validation
+func parseIntParam(param string, min, max int) (int, error) {
+	value, err := strconv.Atoi(param)
+	if err != nil {
+		return 0, fmt.Errorf("invalid integer: %s", param)
+	}
+	if value < min || value > max {
+		return 0, fmt.Errorf("value %d out of range [%d, %d]", value, min, max)
+	}
+	return value, nil
+}
+
 // CreateTwitterTask handles Twitter task creation
 func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 	var req models.TaskCreationRequest
@@ -33,10 +47,25 @@ func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 		return
 	}
 
+	// Map API task type to internal task type
+	var internalTaskType models.TaskType
+	switch req.TaskType {
+	case "twitter_task":
+		internalTaskType = models.TwitterRetweetTask // Maps to "twitter_retweet"
+	case "task_creation":
+		internalTaskType = models.TaskCreationTask // Maps to "task_creation"
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Invalid task type. Must be 'twitter_task' or 'task_creation'",
+		})
+		return
+	}
+
 	// Build task submission request
 	taskReq := &models.TaskSubmitRequest{
 		UserWallet: req.UserWallet,
-		TaskType:   string(models.TaskCreationTask),
+		TaskType:   string(internalTaskType), // Use internal task type
 		Payload: map[string]interface{}{
 			"project_name":     req.ProjectName,
 			"project_icon":     req.ProjectIcon,

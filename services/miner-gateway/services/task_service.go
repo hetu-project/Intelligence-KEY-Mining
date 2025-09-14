@@ -78,8 +78,8 @@ func (ts *TaskService) SubmitTask(ctx context.Context, req *models.TaskSubmitReq
 		UpdatedAt:  time.Now(),
 	}
 
-	// 3. Check if VLC increment is needed on submission
-	vlcClock := ts.enhancedVLCService.IncrementForTask(ctx, task.ID, task.TaskType, "submission", req.Payload)
+	// 3. Check if VLC increment is needed on submission (dual-layer VLC)
+	vlcClock := ts.enhancedVLCService.IncrementForTask(ctx, task.ID, task.TaskType, "submission", req.Payload, req.UserWallet)
 	task.VLCClock = vlcClock
 
 	// 4. Save to database
@@ -173,8 +173,8 @@ func (ts *TaskService) pollTaskStatus(ctx context.Context, task *models.Task, ve
 
 // handleTaskVerified handles verified task
 func (ts *TaskService) handleTaskVerified(ctx context.Context, task *models.Task, proof *models.TaskProof) {
-	// 1. Check if VLC increment is needed on validation
-	vlcClock := ts.enhancedVLCService.IncrementForTask(ctx, task.ID, task.TaskType, "verification", task.Payload)
+	// 1. Check if VLC increment is needed on validation (dual-layer VLC)
+	vlcClock := ts.enhancedVLCService.IncrementForTask(ctx, task.ID, task.TaskType, "verification", task.Payload, task.UserWallet)
 	task.VLCClock = vlcClock
 
 	// 2. Update task status and proof

@@ -14,8 +14,8 @@ const (
 	DiscordMessageTask TaskType = "discord_message"
 	EmailConfirmTask   TaskType = "email_confirm"
 	// New task types
-	TaskCreationTask      TaskType = "task_creation"
-	BatchVerificationTask TaskType = "batch_verification"
+	TaskCreationTask TaskType = "task_creation"
+	// Note: BatchVerificationTask removed - it's an operation, not a task type
 	// Future extended task types
 )
 
@@ -27,6 +27,7 @@ const (
 	TaskPendingVerification TaskStatus = "PENDING_VERIFICATION"
 	TaskVerified            TaskStatus = "VERIFIED"
 	TaskFailed              TaskStatus = "FAILED"
+	TaskPendingReview       TaskStatus = "PENDING_REVIEW" // 需要人工审核
 	TaskMinerOutputCreated  TaskStatus = "MINER_OUTPUT_CREATED"
 	TaskVoted               TaskStatus = "VOTED"
 	TaskConfirmed           TaskStatus = "CONFIRMED"
@@ -100,6 +101,7 @@ type MinerOutput struct {
 // TaskCreationRequest represents task creation request
 type TaskCreationRequest struct {
 	UserWallet      string `json:"user_wallet" binding:"required"`
+	TaskType        string `json:"task_type" binding:"required"` // API task type string
 	ProjectName     string `json:"project_name" binding:"required"`
 	ProjectIcon     string `json:"project_icon"`
 	Description     string `json:"description" binding:"required"`

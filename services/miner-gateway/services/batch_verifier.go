@@ -14,9 +14,10 @@ import (
 
 // BatchVerifier batch verification service
 type BatchVerifier struct {
-	taskService  *TaskService
-	vlcService   *EnhancedVLCService
-	pointsClient *points.Client // Points service client
+	taskService            *TaskService
+	vlcService             *EnhancedVLCService
+	pointsClient           *points.Client              // Points service client
+	twitterVerificationSvc *TwitterVerificationService // New Twitter verification service
 
 	// Async processing queue
 	taskQueue chan *models.Task
@@ -49,7 +50,7 @@ type BatchVerificationResult struct {
 }
 
 // NewBatchVerifier creates batch verifier
-func NewBatchVerifier(taskService *TaskService, vlcService *EnhancedVLCService, pointsServiceURL string, workers int) *BatchVerifier {
+func NewBatchVerifier(taskService *TaskService, vlcService *EnhancedVLCService, pointsServiceURL string, workers int, twitterVerificationSvc *TwitterVerificationService) *BatchVerifier {
 	if workers <= 0 {
 		workers = 5 // Default 5 workers
 	}
@@ -60,11 +61,12 @@ func NewBatchVerifier(taskService *TaskService, vlcService *EnhancedVLCService, 
 	}
 
 	return &BatchVerifier{
-		taskService:  taskService,
-		vlcService:   vlcService,
-		pointsClient: pointsClient,
-		taskQueue:    make(chan *models.Task, 1000), // Queue buffer
-		workers:      workers,
+		taskService:            taskService,
+		vlcService:             vlcService,
+		pointsClient:           pointsClient,
+		twitterVerificationSvc: twitterVerificationSvc,
+		taskQueue:              make(chan *models.Task, 1000), // Queue buffer
+		workers:                workers,
 	}
 }
 
@@ -140,9 +142,44 @@ func (bv *BatchVerifier) worker(ctx context.Context, workerID int) {
 	log.Printf("BatchVerifier worker %d stopped", workerID)
 }
 
-// processTask processes a single task
+// processTask processes a single task with full fault tolerance
 func (bv *BatchVerifier) processTask(ctx context.Context, task *models.Task, workerID int) {
-	log.Printf("Worker %d processing task %s", workerID, task.ID)
+	log.Printf("Worker %d processing task %s (type: %s)", workerID, task.ID, task.TaskType)
+
+	// Twitter任务处理 - 完整容错策略
+	if task.TaskType == models.TwitterRetweetTask {
+		if bv.twitterVerificationSvc != nil {
+			// 有验证服务，尝试验证
+			result, err := bv.twitterVerificationSvc.VerifyTwitterRetweetTask(ctx, task)
+			if err != nil {
+				// 这种情况理论上不应该发生，因为VerifyTwitterRetweetTask不返回error
+				log.Printf("Unexpected error in Twitter verification: %v", err)
+				bv.handleTwitterTaskAsIncomplete(ctx, task, fmt.Errorf("verification service error: %v", err))
+				return
+			}
+
+			if result.Verified {
+				log.Printf("Worker %d: Task %s verified successfully", workerID, task.ID)
+				bv.handleVerificationSuccess(ctx, task, result)
+			} else {
+				log.Printf("Worker %d: Task %s not verified: %v", workerID, task.ID, result.Error)
+				bv.handleTwitterTaskAsIncomplete(ctx, task, result.Error)
+			}
+		} else {
+			// 没有验证服务，标记为未完成
+			log.Printf("Worker %d: Twitter verification service not available, marking task %s as incomplete", workerID, task.ID)
+			bv.handleTwitterTaskAsIncomplete(ctx, task, fmt.Errorf("Twitter verification service not configured"))
+		}
+		return
+	}
+
+	// 其他任务类型的处理...
+	bv.processTaskLegacy(ctx, task, workerID)
+}
+
+// processTaskLegacy processes a single task using legacy batch verification logic
+func (bv *BatchVerifier) processTaskLegacy(ctx context.Context, task *models.Task, workerID int) {
+	log.Printf("Worker %d processing task %s with legacy logic", workerID, task.ID)
 
 	var payload BatchVerificationPayload
 	payloadJSON, _ := json.Marshal(task.Payload)
@@ -196,12 +233,16 @@ func (bv *BatchVerifier) processTask(ctx context.Context, task *models.Task, wor
 	// Trigger VLC increment
 	if result.VLCIncrement > 0 {
 		// Construct VLC increment payload
+		// Batch verification is now an operation, not a task type
+		// For now, just increment the miner VLC once for the batch operation
+		// TODO: In step 4, we'll properly track individual task verification
 		vlcPayload := map[string]interface{}{
-			"increment":      result.VLCIncrement,
-			"batch_size":     result.TotalTasks,
-			"verified_count": result.VerifiedTasks,
+			"batch_operation": true,
+			"batch_size":      result.TotalTasks,
+			"verified_count":  result.VerifiedTasks,
 		}
-		bv.vlcService.IncrementForTask(ctx, task.ID, "batch_verification", "verification", vlcPayload)
+		// Use empty user wallet to increment only miner VLC for batch operation
+		bv.vlcService.IncrementForTask(ctx, task.ID, models.TwitterRetweetTask, "verification", vlcPayload, "")
 	}
 
 	// 🎯 Key: Distribute points (after validator voting passes)
@@ -380,4 +421,94 @@ func (bv *BatchVerifier) determineTaskType(tweetID string) string {
 		return "creation" // Assume tasks starting with 'c' are creation tasks
 	}
 	return "retweet" // Default to retweet tasks
+}
+
+// handleVerificationSuccess handles successful Twitter verification
+func (bv *BatchVerifier) handleVerificationSuccess(ctx context.Context, task *models.Task, result *TwitterVerificationResult) {
+	// Update task status to verified
+	proofData := map[string]interface{}{
+		"verification_result": result,
+		"verified_at":         time.Now(),
+		"verification_type":   "twitter_retweet_check",
+	}
+
+	proofJSON, _ := json.Marshal(proofData)
+
+	if err := bv.taskService.updateTaskStatusWithProof(ctx, task.ID, models.TaskVerified, proofJSON); err != nil {
+		log.Printf("Failed to update task status for %s: %v", task.ID, err)
+		return
+	}
+
+	// Increment VLC for verified Twitter task
+	if bv.vlcService != nil {
+		vlcPayload := map[string]interface{}{
+			"verification_type": "twitter_retweet_check",
+			"tweet_id":          result.TweetID,
+			"verified":          true,
+		}
+		bv.vlcService.IncrementForTask(ctx, task.ID, models.TwitterRetweetTask, "verification", vlcPayload, task.UserWallet)
+		log.Printf("VLC incremented for user %s completing Twitter task %s", task.UserWallet, task.ID)
+	}
+
+	// Distribute points if points service is available
+	if bv.pointsClient != nil {
+		if err := bv.distributePointsForVerifiedTask(ctx, task); err != nil {
+			log.Printf("Failed to distribute points for task %s: %v", task.ID, err)
+		}
+	}
+}
+
+// handleTwitterTaskAsIncomplete 处理Twitter任务为未完成状态 - 统一容错处理
+func (bv *BatchVerifier) handleTwitterTaskAsIncomplete(ctx context.Context, task *models.Task, reason error) {
+	var reasonStr string
+	if reason != nil {
+		reasonStr = reason.Error()
+	} else {
+		reasonStr = "unknown reason"
+	}
+
+	proofData := map[string]interface{}{
+		"verification_status": "incomplete",
+		"reason":              reasonStr,
+		"timestamp":           time.Now(),
+		"retry_available":     task.Attempts < 3,
+		"verification_type":   "twitter_retweet_check",
+	}
+
+	proofJSON, _ := json.Marshal(proofData)
+
+	// 状态管理策略
+	status := models.TaskPendingVerification
+	if task.Attempts >= 3 {
+		// 超过重试次数，标记为需要人工处理
+		status = models.TaskPendingReview
+		log.Printf("Task %s moved to PENDING_REVIEW after %d attempts", task.ID, task.Attempts)
+	}
+
+	if err := bv.taskService.updateTaskStatusWithProof(ctx, task.ID, status, proofJSON); err != nil {
+		log.Printf("Failed to update task status for %s: %v", task.ID, err)
+	}
+
+	// 不增加VLC，不分发积分 - 这是关键的容错策略
+	log.Printf("Task %s marked as incomplete due to: %v", task.ID, reasonStr)
+}
+
+// distributePointsForVerifiedTask distributes points for a single verified task
+func (bv *BatchVerifier) distributePointsForVerifiedTask(ctx context.Context, task *models.Task) error {
+	taskVLC := points.TaskVLC{
+		UserWallet: task.UserWallet,
+		TaskType:   string(task.TaskType),
+		VLCValue:   1, // VLC value for this task
+		TaskID:     task.ID,
+	}
+
+	pointsReq := &points.PointsDistributionRequest{
+		BatchID:     fmt.Sprintf("twitter-task-%s", task.ID),
+		TriggerType: "task_verification",
+		Timestamp:   time.Now(),
+		Tasks:       []points.TaskVLC{taskVLC},
+	}
+
+	_, err := bv.pointsClient.DistributePoints(ctx, pointsReq)
+	return err
 }

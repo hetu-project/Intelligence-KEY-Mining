@@ -20,9 +20,10 @@ type BatchVerificationVerifier struct {
 }
 
 // NewBatchVerificationVerifier creates a new batch verification verifier
+// Note: Batch verification is now an operation that processes TwitterRetweetTask instances
 func NewBatchVerificationVerifier(middleLayerURL, apiKey string) *BatchVerificationVerifier {
 	return &BatchVerificationVerifier{
-		BaseVerifier:   NewBaseVerifier(models.BatchVerificationTask),
+		BaseVerifier:   NewBaseVerifier(models.TwitterRetweetTask), // Process Twitter tasks in batch
 		middleLayerURL: middleLayerURL,
 		apiKey:         apiKey,
 		client: &http.Client{
