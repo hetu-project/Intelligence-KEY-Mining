@@ -52,22 +52,30 @@ func (tv *TwitterVerifier) ValidateSync(ctx context.Context, payload map[string]
 		return false, nil, err
 	}
 
+	// Check if middleware URL is configured
+	if tv.middleLayerURL == "" {
+		// No middleware configured, defer to async verification
+		return false, nil, nil
+	}
+
 	// Build verification request
 	verifyReq := map[string]interface{}{
-		"tweet_id":   payload["tweet_id"],
-		"twitter_id": payload["twitter_id"],
-		"action":     "verify_retweet",
+		"tweet_id":         payload["tweet_id"],
+		"twitter_username": payload["twitter_username"],
+		"action":           "verify_retweet",
 	}
 
 	reqBody, err := json.Marshal(verifyReq)
 	if err != nil {
+		// JSON marshal error should still be an error (indicates code issue)
 		return false, nil, fmt.Errorf("failed to marshal request: %v", err)
 	}
 
 	// Call middleware API
 	req, err := http.NewRequestWithContext(ctx, "POST", tv.middleLayerURL+"/verify-retweet", bytes.NewBuffer(reqBody))
 	if err != nil {
-		return false, nil, fmt.Errorf("failed to create request: %v", err)
+		// Request creation failed, defer to async verification
+		return false, nil, nil
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -75,7 +83,8 @@ func (tv *TwitterVerifier) ValidateSync(ctx context.Context, payload map[string]
 
 	resp, err := tv.client.Do(req)
 	if err != nil {
-		return false, nil, fmt.Errorf("failed to call middle layer: %v", err)
+		// HTTP call failed, defer to async verification
+		return false, nil, nil
 	}
 	defer resp.Body.Close()
 
@@ -89,11 +98,13 @@ func (tv *TwitterVerifier) ValidateSync(ctx context.Context, payload map[string]
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return false, nil, fmt.Errorf("failed to decode response: %v", err)
+		// Response decode failed, defer to async verification
+		return false, nil, nil
 	}
 
 	if !result.Success {
-		return false, nil, fmt.Errorf("verification failed: %s", result.Message)
+		// Verification API returned failure, defer to async verification
+		return false, nil, nil
 	}
 
 	if !result.Verified {
@@ -120,10 +131,10 @@ func (tv *TwitterVerifier) RegisterAsyncWatch(ctx context.Context, payload map[s
 
 	// Build async monitoring request
 	watchReq := map[string]interface{}{
-		"tweet_id":     payload["tweet_id"],
-		"twitter_id":   payload["twitter_id"],
-		"action":       "register_watch",
-		"callback_url": "", // If webhook callback is needed
+		"tweet_id":         payload["tweet_id"],
+		"twitter_username": payload["twitter_username"],
+		"action":           "register_watch",
+		"callback_url":     "", // If webhook callback is needed
 	}
 
 	reqBody, err := json.Marshal(watchReq)
