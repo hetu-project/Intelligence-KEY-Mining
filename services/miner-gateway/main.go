@@ -43,9 +43,8 @@ func main() {
 
 	// 3. Initialize validator registry
 	verifierRegistry := verifiers.NewVerifierRegistry()
-	verifierRegistry.RegisterVerifier("twitter_retweet", verifiers.NewTwitterVerifier(cfg.TwitterMiddleLayerURL, cfg.TwitterAPIKey))
 	verifierRegistry.RegisterVerifier("task_creation", verifiers.NewTaskCreationVerifier())
-	verifierRegistry.RegisterVerifier("batch_verification", verifiers.NewBatchVerificationVerifier(cfg.TwitterMiddleLayerURL, cfg.TwitterAPIKey))
+	// Note: Twitter verification is now handled by TwitterVerificationService, not the old verifiers
 
 	// 4. Initialize services
 	vlcService := services.NewVLCService()

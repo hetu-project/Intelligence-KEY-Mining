@@ -94,13 +94,8 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("DATABASE_URL is required")
 	}
 
-	if c.TwitterMiddleLayerURL == "" {
-		return fmt.Errorf("TWITTER_MIDDLE_LAYER_URL is required")
-	}
-
-	if c.TwitterAPIKey == "" {
-		return fmt.Errorf("TWITTER_API_KEY is required")
-	}
+	// TwitterMiddleLayerURL and TwitterAPIKey are no longer required
+	// Twitter verification is now handled by TwitterVerificationService with TwitterRetweetCheckURL
 
 	if len(c.ValidatorEndpoints) == 0 {
 		return fmt.Errorf("at least one validator endpoint is required")

@@ -50,14 +50,14 @@ func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 	// Map API task type to internal task type
 	var internalTaskType models.TaskType
 	switch req.TaskType {
-	case "twitter_task":
+	case "twitter_retweet":
 		internalTaskType = models.TwitterRetweetTask // Maps to "twitter_retweet"
 	case "task_creation":
 		internalTaskType = models.TaskCreationTask // Maps to "task_creation"
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"message": "Invalid task type. Must be 'twitter_task' or 'task_creation'",
+			"message": "Invalid task type. Must be 'twitter_retweet' or 'task_creation'",
 		})
 		return
 	}
