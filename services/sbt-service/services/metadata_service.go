@@ -15,24 +15,29 @@ import (
 
 // MetadataService handles SBT metadata generation and management
 type MetadataService struct {
-	db            *sql.DB
-	pinataService *PinataService
-	baseURL       string         // Base API URL for external_url
-	pointsClient  *points.Client // Points service client
+	db              *sql.DB
+	pinataService   *PinataService
+	baseURL         string           // Base API URL for external_url
+	pointsClient    *points.Client   // Points service client
+	referralService *ReferralService // Third-party referral API client
 }
 
 // NewMetadataService creates a new metadata service
-func NewMetadataService(db *sql.DB, pinataService *PinataService, baseURL string, pointsServiceURL string) *MetadataService {
+func NewMetadataService(db *sql.DB, pinataService *PinataService, baseURL string, pointsServiceURL string, referralAPIURL string) *MetadataService {
 	var pointsClient *points.Client
 	if pointsServiceURL != "" {
 		pointsClient = points.NewClient(pointsServiceURL)
 	}
 
+	// Initialize referral service (can be nil if URL not provided)
+	referralService := NewReferralService(referralAPIURL)
+
 	return &MetadataService{
-		db:            db,
-		pinataService: pinataService,
-		baseURL:       baseURL,
-		pointsClient:  pointsClient,
+		db:              db,
+		pinataService:   pinataService,
+		baseURL:         baseURL,
+		pointsClient:    pointsClient,
+		referralService: referralService,
 	}
 }
 
@@ -200,11 +205,24 @@ func (ms *MetadataService) GetDynamicMetadata(ctx context.Context, walletAddress
 		pointsRecords = []models.PointsRecord{}
 	}
 
+	// 4. Get invitation information from third-party API
+	var invitationInfo *models.InvitationInfo
+	if ms.referralService != nil {
+		invitationInfo = ms.referralService.GetReferralInfoSafe(ctx, walletAddress)
+	} else {
+		// Fallback: empty invitation info if no referral service configured
+		invitationInfo = &models.InvitationInfo{
+			Invitees:     []string{},
+			InviteeCount: 0,
+		}
+	}
+
 	return &models.DynamicMetadata{
 		DynamicAttributes:       dynamicAttrs,
 		HistoricalPointsRecords: pointsRecords,
 		Subnets:                 profile.Subnets,
 		SubnetNFTs:              profile.SubnetNFTs,
+		InvitationInfo:          invitationInfo,
 	}, nil
 }
 

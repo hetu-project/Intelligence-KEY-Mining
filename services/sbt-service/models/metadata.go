@@ -45,10 +45,19 @@ type SBTGenerationResponse struct {
 
 // DynamicMetadata represents dynamic metadata returned by external_url
 type DynamicMetadata struct {
-	DynamicAttributes       []Attribute    `json:"dynamic_attributes"`
-	HistoricalPointsRecords []PointsRecord `json:"historical_points_records"`
-	Subnets                 []SubnetInfo   `json:"subnets"`
-	SubnetNFTs              []SubnetNFT    `json:"subnet_nfts"`
+	DynamicAttributes       []Attribute     `json:"dynamic_attributes"`
+	HistoricalPointsRecords []PointsRecord  `json:"historical_points_records"`
+	Subnets                 []SubnetInfo    `json:"subnets"`
+	SubnetNFTs              []SubnetNFT     `json:"subnet_nfts"`
+	InvitationInfo          *InvitationInfo `json:"invitation_info,omitempty"`
+}
+
+// InvitationInfo represents invitation relationship information
+type InvitationInfo struct {
+	Inviter      string   `json:"inviter,omitempty"`      // Who invited this user
+	InviterHash  string   `json:"inviter_hash,omitempty"` // Hashed inviter address for privacy
+	Invitees     []string `json:"invitees,omitempty"`     // Users invited by this user
+	InviteeCount int      `json:"invitee_count"`          // Total number of invitees
 }
 
 // PointsRecord represents a points record

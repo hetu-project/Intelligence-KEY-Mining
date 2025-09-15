@@ -213,13 +213,28 @@ get_available_migrations() {
         return
     fi
     
+    # If no migrations directory or no migration files, use schema.sql
+    if [[ ! -d "$MIGRATIONS_DIR" ]] || [[ -z "$(find "$MIGRATIONS_DIR" -name "*.sql" -type f 2>/dev/null)" ]]; then
+        if [[ -f "$SCRIPT_DIR/schema.sql" ]]; then
+            echo "$SCRIPT_DIR/schema.sql"
+        fi
+        return
+    fi
+    
     find "$MIGRATIONS_DIR" -name "*.sql" -type f | sort
 }
 
 # Extract migration version
 extract_version() {
     local file="$1"
-    basename "$file" | sed 's/^\([0-9]\+\)_.*/\1/'
+    local filename=$(basename "$file")
+    
+    # If it's schema.sql, return "000" as version
+    if [[ "$filename" == "schema.sql" ]]; then
+        echo "000"
+    else
+        echo "$filename" | sed 's/^\([0-9]\+\)_.*/\1/'
+    fi
 }
 
 # Execute migration file

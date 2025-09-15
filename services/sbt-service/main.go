@@ -30,6 +30,7 @@ func main() {
 	baseURL := getEnvOrDefault("BASE_URL", "http://localhost:8080")
 	port := getEnvOrDefault("PORT", "8080")
 	logLevel := getEnvOrDefault("LOG_LEVEL", "info")
+	referralAPIURL := getEnvOrDefault("REFERRAL_API_URL", "")
 
 	// Validate required environment variables
 	if pinataAPIKey == "" || pinataSecretKey == "" {
@@ -53,7 +54,7 @@ func main() {
 	// Initialize services
 	pinataService := services.NewPinataService(pinataAPIKey, pinataSecretKey)
 	pointsServiceURL := getEnvOrDefault("POINTS_SERVICE_URL", "http://localhost:8087")
-	metadataService := services.NewMetadataService(db, pinataService, baseURL, pointsServiceURL)
+	metadataService := services.NewMetadataService(db, pinataService, baseURL, pointsServiceURL, referralAPIURL)
 
 	// Initialize blockchain service and check contract
 	blockchainService, err := services.NewBlockchainService()
