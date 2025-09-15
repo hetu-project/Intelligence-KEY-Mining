@@ -24,6 +24,11 @@ type BatchVerifier struct {
 	workers   int
 	mu        sync.RWMutex
 	running   bool
+
+	// Batch round management
+	currentRound        *models.BatchVerificationRound
+	roundMutex          sync.RWMutex
+	roundCompletionChan chan *models.BatchVerificationRound
 }
 
 // TaskInfo single task information
@@ -67,6 +72,7 @@ func NewBatchVerifier(taskService *TaskService, vlcService *EnhancedVLCService, 
 		twitterVerificationSvc: twitterVerificationSvc,
 		taskQueue:              make(chan *models.Task, 1000), // Queue buffer
 		workers:                workers,
+		roundCompletionChan:    make(chan *models.BatchVerificationRound, 10), // Buffer for completed rounds
 	}
 }
 
@@ -425,17 +431,19 @@ func (bv *BatchVerifier) determineTaskType(tweetID string) string {
 
 // handleVerificationSuccess handles successful Twitter verification
 func (bv *BatchVerifier) handleVerificationSuccess(ctx context.Context, task *models.Task, result *TwitterVerificationResult) {
-	// Update task status to verified
+	// Record verification proof but keep task status as PENDING_VERIFICATION for continuous verification
 	proofData := map[string]interface{}{
 		"verification_result": result,
 		"verified_at":         time.Now(),
 		"verification_type":   "twitter_retweet_check",
+		"continuous_check":    true, // Indicates this is part of continuous verification
 	}
 
 	proofJSON, _ := json.Marshal(proofData)
 
-	if err := bv.taskService.updateTaskStatusWithProof(ctx, task.ID, models.TaskVerified, proofJSON); err != nil {
-		log.Printf("Failed to update task status for %s: %v", task.ID, err)
+	// Update task proof but keep status as PENDING_VERIFICATION for continuous verification
+	if err := bv.taskService.updateTaskStatusWithProof(ctx, task.ID, models.TaskPendingVerification, proofJSON); err != nil {
+		log.Printf("Failed to update task proof for %s: %v", task.ID, err)
 		return
 	}
 
@@ -450,12 +458,12 @@ func (bv *BatchVerifier) handleVerificationSuccess(ctx context.Context, task *mo
 		log.Printf("VLC incremented for user %s completing Twitter task %s", task.UserWallet, task.ID)
 	}
 
-	// Distribute points if points service is available
-	if bv.pointsClient != nil {
-		if err := bv.distributePointsForVerifiedTask(ctx, task); err != nil {
-			log.Printf("Failed to distribute points for task %s: %v", task.ID, err)
-		}
-	}
+	// NOTE: Points distribution moved to PoCW consensus completion
+	// No immediate points distribution for Twitter tasks - wait for PoCW consensus
+	log.Printf("Twitter task %s verified successfully, awaiting PoCW consensus for points distribution", task.ID)
+
+	// Track task completion in current batch round
+	bv.trackTaskCompletion(task.ID, true)
 }
 
 // handleTwitterTaskAsIncomplete 处理Twitter任务为未完成状态 - 统一容错处理
@@ -491,6 +499,9 @@ func (bv *BatchVerifier) handleTwitterTaskAsIncomplete(ctx context.Context, task
 
 	// 不增加VLC，不分发积分 - 这是关键的容错策略
 	log.Printf("Task %s marked as incomplete due to: %v", task.ID, reasonStr)
+
+	// Track task completion in current batch round
+	bv.trackTaskCompletion(task.ID, false)
 }
 
 // distributePointsForVerifiedTask distributes points for a single verified task
@@ -511,4 +522,140 @@ func (bv *BatchVerifier) distributePointsForVerifiedTask(ctx context.Context, ta
 
 	_, err := bv.pointsClient.DistributePoints(ctx, pointsReq)
 	return err
+}
+
+// ===== Batch Round Management Methods =====
+
+// StartBatchRound starts a new batch verification round
+func (bv *BatchVerifier) StartBatchRound(tasks []*models.Task, taskType models.TaskType) *models.BatchVerificationRound {
+	bv.roundMutex.Lock()
+	defer bv.roundMutex.Unlock()
+
+	roundID := fmt.Sprintf("batch_%s_%d", taskType, time.Now().Unix())
+
+	round := &models.BatchVerificationRound{
+		RoundID:    roundID,
+		StartTime:  time.Now(),
+		TaskType:   taskType,
+		TotalTasks: len(tasks),
+		Tasks:      tasks,
+		VLCBefore:  bv.vlcService.GetMinerVLC(),
+		Status:     "processing",
+		VerificationSummary: map[string]interface{}{
+			"started_at": time.Now(),
+			"task_type":  taskType,
+		},
+	}
+
+	bv.currentRound = round
+	log.Printf("Started batch verification round %s with %d %s tasks", roundID, len(tasks), taskType)
+
+	return round
+}
+
+// CompleteBatchRound completes the current batch verification round
+func (bv *BatchVerifier) CompleteBatchRound(verifiedCount, failedCount int) {
+	bv.roundMutex.Lock()
+	defer bv.roundMutex.Unlock()
+
+	if bv.currentRound == nil {
+		log.Printf("Warning: No active batch round to complete")
+		return
+	}
+
+	now := time.Now()
+	bv.currentRound.EndTime = &now
+	bv.currentRound.VerifiedTasks = verifiedCount
+	bv.currentRound.FailedTasks = failedCount
+	bv.currentRound.VLCAfter = bv.vlcService.GetMinerVLC()
+	bv.currentRound.Status = "completed"
+
+	// Update verification summary
+	bv.currentRound.VerificationSummary["completed_at"] = now
+	bv.currentRound.VerificationSummary["duration_seconds"] = now.Sub(bv.currentRound.StartTime).Seconds()
+	bv.currentRound.VerificationSummary["success_rate"] = float64(verifiedCount) / float64(bv.currentRound.TotalTasks)
+
+	log.Printf("Completed batch verification round %s: %d/%d tasks verified",
+		bv.currentRound.RoundID, verifiedCount, bv.currentRound.TotalTasks)
+
+	// Send to round completion channel for PoCW consensus
+	select {
+	case bv.roundCompletionChan <- bv.currentRound:
+		log.Printf("Batch round %s queued for PoCW consensus", bv.currentRound.RoundID)
+	default:
+		log.Printf("Warning: Round completion channel full, dropping round %s", bv.currentRound.RoundID)
+	}
+
+	bv.currentRound = nil
+}
+
+// GetCompletedRounds returns completed rounds waiting for PoCW consensus
+func (bv *BatchVerifier) GetCompletedRounds() chan *models.BatchVerificationRound {
+	return bv.roundCompletionChan
+}
+
+// GetCurrentRound returns the current active batch round
+func (bv *BatchVerifier) GetCurrentRound() *models.BatchVerificationRound {
+	bv.roundMutex.RLock()
+	defer bv.roundMutex.RUnlock()
+	return bv.currentRound
+}
+
+// trackTaskCompletion tracks completion of a task in the current round
+func (bv *BatchVerifier) trackTaskCompletion(taskID string, success bool) {
+	bv.roundMutex.Lock()
+	defer bv.roundMutex.Unlock()
+
+	if bv.currentRound == nil {
+		return // No active round
+	}
+
+	// Update task completion status in the round
+	for _, task := range bv.currentRound.Tasks {
+		if task.ID == taskID {
+			if success {
+				bv.currentRound.VerifiedTasks++
+			} else {
+				bv.currentRound.FailedTasks++
+			}
+			break
+		}
+	}
+
+	// Check if all tasks are completed
+	completedTasks := bv.currentRound.VerifiedTasks + bv.currentRound.FailedTasks
+	if completedTasks >= bv.currentRound.TotalTasks {
+		log.Printf("All tasks completed in round %s, finalizing round", bv.currentRound.RoundID)
+		bv.finalizeBatchRound()
+	}
+}
+
+// finalizeBatchRound finalizes the current batch round (internal method)
+func (bv *BatchVerifier) finalizeBatchRound() {
+	if bv.currentRound == nil {
+		return
+	}
+
+	now := time.Now()
+	bv.currentRound.EndTime = &now
+	bv.currentRound.VLCAfter = bv.vlcService.GetMinerVLC()
+	bv.currentRound.Status = "completed"
+
+	// Update verification summary
+	bv.currentRound.VerificationSummary["completed_at"] = now
+	bv.currentRound.VerificationSummary["duration_seconds"] = now.Sub(bv.currentRound.StartTime).Seconds()
+	bv.currentRound.VerificationSummary["success_rate"] = float64(bv.currentRound.VerifiedTasks) / float64(bv.currentRound.TotalTasks)
+
+	log.Printf("Finalized batch verification round %s: %d/%d tasks verified",
+		bv.currentRound.RoundID, bv.currentRound.VerifiedTasks, bv.currentRound.TotalTasks)
+
+	// Send to round completion channel for PoCW consensus
+	select {
+	case bv.roundCompletionChan <- bv.currentRound:
+		log.Printf("Batch round %s queued for PoCW consensus", bv.currentRound.RoundID)
+	default:
+		log.Printf("Warning: Round completion channel full, dropping round %s", bv.currentRound.RoundID)
+	}
+
+	bv.currentRound = nil
 }

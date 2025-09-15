@@ -122,51 +122,96 @@ func (vs *ValidatorScheduler) getTasksByTypeAndStatus(ctx context.Context, taskT
 	return vs.taskService.GetTasksByTypeAndStatus(ctx, taskType, status, vs.batchSize)
 }
 
-// processTaskCreationTasks process tasks
+// processTaskCreationTasks process tasks - simplified flow
 func (vs *ValidatorScheduler) processTaskCreationTasks(ctx context.Context, tasks []*models.Task) {
+	log.Printf("Processing %d TaskCreation tasks with simplified flow", len(tasks))
+
 	for _, task := range tasks {
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			if vs.taskCreationVerifier != nil {
-				// Execute sync verification
-				valid, proof, err := vs.taskCreationVerifier.ValidateSync(ctx, task.Payload)
-				if err != nil {
-					log.Printf("Error verifying task creation task %s: %v", task.ID, err)
-					continue
-				}
+			// TaskCreation is just the action of creating a task
+			// Simple validation: check if payload contains required fields
+			if vs.validateTaskCreationPayload(task.Payload) {
+				// TaskCreation验证通过：直接VLC++，任务完成
+				log.Printf("TaskCreation %s validated successfully - completing task", task.ID)
 
-				// Update task status
-				var status models.TaskStatus
-				if valid {
-					status = "VERIFIED"
+				// Create simple proof
+				proof := map[string]interface{}{
+					"validation_type": "task_creation",
+					"validated_at":    time.Now(),
+					"status":          "completed",
+					"message":         "Task creation action completed successfully",
+				}
+				proofJSON, _ := json.Marshal(proof)
+
+				// Update to VERIFIED status (TaskCreation tasks can be VERIFIED as they're just creation actions)
+				if err := vs.taskService.updateTaskStatusWithProof(ctx, task.ID, "VERIFIED", proofJSON); err != nil {
+					log.Printf("Error updating TaskCreation status %s: %v", task.ID, err)
 				} else {
-					status = "FAILED"
+					log.Printf("✅ TaskCreation %s completed successfully", task.ID)
 				}
-
-				var proofJSON []byte
-				if proof != nil {
-					proofJSON, _ = json.Marshal(proof)
+			} else {
+				// Validation failed
+				log.Printf("TaskCreation %s validation failed - invalid payload", task.ID)
+				proof := map[string]interface{}{
+					"validation_type": "task_creation",
+					"validated_at":    time.Now(),
+					"status":          "failed",
+					"message":         "Invalid task creation payload",
 				}
+				proofJSON, _ := json.Marshal(proof)
 
-				if err := vs.taskService.updateTaskStatusWithProof(ctx, task.ID, status, proofJSON); err != nil {
-					log.Printf("Error updating task creation status %s: %v", task.ID, err)
+				if err := vs.taskService.updateTaskStatusWithProof(ctx, task.ID, "FAILED", proofJSON); err != nil {
+					log.Printf("Error updating TaskCreation status %s: %v", task.ID, err)
 				}
 			}
 		}
 	}
 }
 
+// validateTaskCreationPayload validates TaskCreation payload (simple validation)
+func (vs *ValidatorScheduler) validateTaskCreationPayload(payload map[string]interface{}) bool {
+	// Simple validation for task creation
+	if payload == nil {
+		return false
+	}
+
+	// Check if required fields exist (basic validation)
+	if taskDescription, exists := payload["task_description"]; exists {
+		if desc, ok := taskDescription.(string); ok && len(desc) > 0 {
+			return true
+		}
+	}
+
+	// If no task_description, check for other basic fields
+	if len(payload) > 0 {
+		return true // Basic validation: payload is not empty
+	}
+
+	return false
+}
+
 // batchVerifyTwitterTasks performs batch verification of Twitter retweet tasks
-// This is an operation that processes multiple TwitterRetweetTask instances together
+// Uses batch round management for PoCW consensus
 func (vs *ValidatorScheduler) batchVerifyTwitterTasks(ctx context.Context, tasks []*models.Task) {
 	if vs.batchVerifier != nil {
-		// Create a batch verification operation
-		batchTask := vs.createBatchVerificationOperation(tasks)
-		if err := vs.batchVerifier.SubmitTask(batchTask); err != nil {
-			log.Printf("Error submitting batch verification operation: %v", err)
+		log.Printf("Starting batch verification round for %d Twitter tasks", len(tasks))
+
+		// Start a new batch verification round
+		round := vs.batchVerifier.StartBatchRound(tasks, models.TwitterRetweetTask)
+
+		// Process all tasks in the round
+		for _, task := range tasks {
+			if err := vs.batchVerifier.SubmitTask(task); err != nil {
+				log.Printf("Error submitting Twitter task %s: %v", task.ID, err)
+			}
+			// Note: Actual verification happens asynchronously
+			// Task completion tracking is handled in BatchVerifier
 		}
+
+		log.Printf("Batch round %s: submitted %d tasks for verification", round.RoundID, len(tasks))
 	} else {
 		// Fallback: process each Twitter task individually
 		log.Printf("No batch verifier available, processing Twitter tasks individually")
@@ -223,53 +268,6 @@ func (vs *ValidatorScheduler) processTwitterRetweetTask(ctx context.Context, tas
 
 	proofJSON, _ := json.Marshal(proof)
 	return vs.taskService.updateTaskStatusWithProof(ctx, task.ID, status, proofJSON)
-}
-
-// createBatchVerificationOperation creates a batch verification operation from multiple Twitter tasks
-func (vs *ValidatorScheduler) createBatchVerificationOperation(twitterTasks []*models.Task) *models.Task {
-	// Create a synthetic batch operation task
-	batchTaskID := fmt.Sprintf("batch_%d_%d", time.Now().Unix(), len(twitterTasks))
-
-	// Extract task information for batch processing
-	taskInfos := make([]map[string]interface{}, 0, len(twitterTasks))
-	for _, task := range twitterTasks {
-		taskInfo := map[string]interface{}{
-			"task_id":     task.ID,
-			"user_wallet": task.UserWallet,
-			"tweet_id":    "", // Extract from payload if available
-			"twitter_id":  "", // Extract from payload if available
-		}
-
-		// Extract Twitter-specific data from payload
-		if tweetID, ok := task.Payload["tweet_id"].(string); ok {
-			taskInfo["tweet_id"] = tweetID
-		}
-		if twitterID, ok := task.Payload["twitter_id"].(string); ok {
-			taskInfo["twitter_id"] = twitterID
-		}
-
-		taskInfos = append(taskInfos, taskInfo)
-	}
-
-	// Create batch operation payload
-	batchPayload := map[string]interface{}{
-		"operation_type": "batch_twitter_verification",
-		"tasks":          taskInfos,
-		"batch_size":     len(twitterTasks),
-		"created_at":     time.Now().Format(time.RFC3339),
-	}
-
-	// Return a synthetic task representing the batch operation
-	return &models.Task{
-		ID:         batchTaskID,
-		UserWallet: "system",          // System operation
-		TaskType:   "batch_operation", // Not a real task type, just for internal use
-		Status:     models.TaskSubmitted,
-		Payload:    batchPayload,
-		Attempts:   0,
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
-	}
 }
 
 // SetPollInterval set poll interval

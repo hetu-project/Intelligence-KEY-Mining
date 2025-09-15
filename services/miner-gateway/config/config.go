@@ -23,6 +23,7 @@ type Config struct {
 	ValidatorEndpoints           []ValidatorEndpoint `json:"validator_endpoints"`
 	LogLevel                     string              `json:"log_level"`
 	ValidatorPollIntervalSeconds int                 `json:"validator_poll_interval_seconds"`
+	ConsensusDelaySeconds        int                 `json:"consensus_delay_seconds"`
 }
 
 // ValidatorEndpoint represents a validator service endpoint
@@ -46,6 +47,16 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("VALIDATOR_POLL_INTERVAL_SECONDS must be positive, got: %d", pollInterval)
 	}
 
+	// Parse consensus delay from environment variable
+	consensusDelayStr := getEnv("CONSENSUS_DELAY_SECONDS", "300") // 5 minutes default
+	consensusDelay, err := strconv.Atoi(consensusDelayStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid CONSENSUS_DELAY_SECONDS: %v", err)
+	}
+	if consensusDelay < 0 {
+		return nil, fmt.Errorf("CONSENSUS_DELAY_SECONDS must be non-negative, got: %d", consensusDelay)
+	}
+
 	config := &Config{
 		Port:                         getEnv("PORT", "8080"),
 		DatabaseURL:                  getEnv("DATABASE_URL", ""),
@@ -56,6 +67,7 @@ func Load() (*Config, error) {
 		TwitterRetweetCheckURL:       getEnv("TWITTER_RETWEET_CHECK_URL", ""),
 		LogLevel:                     getEnv("LOG_LEVEL", "info"),
 		ValidatorPollIntervalSeconds: pollInterval,
+		ConsensusDelaySeconds:        consensusDelay,
 	}
 
 	// Load private key

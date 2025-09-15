@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hetu-project/Intelligence-KEY-Mining/pkg/points"
 	"github.com/hetu-project/Intelligence-KEY-Mining/pkg/vlc"
 	"github.com/hetu-project/Intelligence-KEY-Mining/services/miner-gateway/models"
 )
@@ -68,6 +69,8 @@ type RoundCoordinator struct {
 	taskService        *TaskService
 	enhancedVLCService *EnhancedVLCService
 	validatorClient    *ValidatorClient
+	batchVerifier      *BatchVerifier
+	pointsClient       *points.Client
 
 	// Round management
 	currentRound *Round
@@ -76,6 +79,7 @@ type RoundCoordinator struct {
 
 	// Configuration
 	roundInterval      time.Duration // How often to start new rounds
+	consensusDelay     time.Duration // Delay after verification before consensus
 	consensusThreshold int           // BFT threshold (typically 3 out of 4)
 	maxTasksPerRound   int           // Maximum tasks to process per round
 
@@ -92,14 +96,25 @@ func NewRoundCoordinator(
 	taskService *TaskService,
 	enhancedVLCService *EnhancedVLCService,
 	validatorClient *ValidatorClient,
+	batchVerifier *BatchVerifier,
+	pointsServiceURL string,
 	roundIntervalSeconds int,
+	consensusDelaySeconds int,
 ) *RoundCoordinator {
+	var pointsClient *points.Client
+	if pointsServiceURL != "" {
+		pointsClient = points.NewClient(pointsServiceURL)
+	}
+
 	return &RoundCoordinator{
 		taskService:        taskService,
 		enhancedVLCService: enhancedVLCService,
 		validatorClient:    validatorClient,
+		batchVerifier:      batchVerifier,
+		pointsClient:       pointsClient,
 		roundHistory:       make([]*Round, 0),
 		roundInterval:      time.Duration(roundIntervalSeconds) * time.Second,
+		consensusDelay:     time.Duration(consensusDelaySeconds) * time.Second,
 		consensusThreshold: 3,  // 3 out of 4 validators (BFT: f=1, need 2f+1=3)
 		maxTasksPerRound:   50, // Process up to 50 tasks per round
 	}
@@ -121,7 +136,7 @@ func (rc *RoundCoordinator) Start(ctx context.Context) error {
 	// Start the coordination loop
 	go rc.coordinationLoop()
 
-	log.Printf("RoundCoordinator started with interval: %v", rc.roundInterval)
+	log.Printf("RoundCoordinator started with interval: %v, consensus delay: %v", rc.roundInterval, rc.consensusDelay)
 	return nil
 }
 
@@ -141,13 +156,19 @@ func (rc *RoundCoordinator) Stop() {
 	log.Println("RoundCoordinator stopped")
 }
 
-// coordinationLoop is the main coordination loop
+// coordinationLoop is the main coordination loop with consensus delay
 func (rc *RoundCoordinator) coordinationLoop() {
+	// Create a ticker for consensus delay
+	consensusTicker := time.NewTicker(rc.consensusDelay)
+	defer consensusTicker.Stop()
+
 	for {
 		select {
 		case <-rc.ctx.Done():
 			return
-		case <-rc.ticker.C:
+		case <-consensusTicker.C:
+			// Process rounds with consensus delay
+			// This gives time for batch verification to complete before consensus
 			if err := rc.processRound(); err != nil {
 				log.Printf("Error processing round: %v", err)
 			}
@@ -402,6 +423,9 @@ func (rc *RoundCoordinator) completeRound(round *Round, result string) {
 	round.Metadata["completion_result"] = result
 	round.Metadata["duration"] = now.Sub(round.StartTime).String()
 
+	// Process PoCW consensus results and handle points distribution
+	rc.handlePoCWConsensusResults(round, result)
+
 	// Add to history
 	rc.roundHistory = append(rc.roundHistory, round)
 
@@ -411,6 +435,158 @@ func (rc *RoundCoordinator) completeRound(round *Round, result string) {
 	}
 
 	rc.currentRound = nil
+}
+
+// handlePoCWConsensusResults handles the results of PoCW consensus
+func (rc *RoundCoordinator) handlePoCWConsensusResults(round *Round, result string) {
+	if result != "success" {
+		log.Printf("Round %s failed (%s), skipping post-consensus processing", round.ID, result)
+		return
+	}
+
+	if round.ConsensusResult == nil {
+		log.Printf("Round %s has no consensus result, skipping post-consensus processing", round.ID)
+		return
+	}
+
+	consensusDecision := round.ConsensusResult.Decision
+	log.Printf("Processing PoCW consensus results for round %s: decision=%s", round.ID, consensusDecision)
+
+	// Only process if consensus was "approved"
+	if consensusDecision != "approved" {
+		log.Printf("Round %s consensus rejected, no points distribution", round.ID)
+		return
+	}
+
+	// Handle points distribution based on task type
+	for _, task := range round.Tasks {
+		rc.handleTaskConsensusApproval(task)
+	}
+}
+
+// handleTaskConsensusApproval handles approved tasks after PoCW consensus
+func (rc *RoundCoordinator) handleTaskConsensusApproval(task *models.Task) {
+	switch task.TaskType {
+	case models.TaskCreationTask:
+		// TaskCreation tasks: No points distribution, just log completion
+		log.Printf("✅ TaskCreation %s consensus approved - task creation completed (no points distribution)", task.ID)
+
+	case models.TwitterRetweetTask:
+		// Twitter tasks: Distribute points after consensus approval
+		log.Printf("✅ Twitter task %s consensus approved - distributing points", task.ID)
+
+		// Check if this is a batch round task
+		if task.UserWallet == "batch_verifier" {
+			// This is a synthetic batch task, distribute points for the actual batch
+			rc.distributeBatchRoundPoints(task)
+		} else {
+			// This is an individual task
+			rc.distributeIndividualTaskPoints(task)
+		}
+
+	default:
+		log.Printf("Unknown task type %s for task %s, skipping post-consensus processing", task.TaskType, task.ID)
+	}
+}
+
+// distributeBatchRoundPoints distributes points for a batch round after consensus
+func (rc *RoundCoordinator) distributeBatchRoundPoints(batchTask *models.Task) {
+	if rc.pointsClient == nil {
+		log.Printf("No points client available for batch points distribution")
+		return
+	}
+
+	// Extract batch round information from task payload
+	payload := batchTask.Payload
+	if payload == nil {
+		log.Printf("Batch task %s has no payload for points distribution", batchTask.ID)
+		return
+	}
+
+	verifiedTasks, ok := payload["verified_tasks"].(int)
+	if !ok {
+		log.Printf("Cannot extract verified_tasks count from batch task %s", batchTask.ID)
+		return
+	}
+
+	roundID, ok := payload["round_id"].(string)
+	if !ok {
+		log.Printf("Cannot extract round_id from batch task %s", batchTask.ID)
+		return
+	}
+
+	log.Printf("🎯 PoCW Consensus Approved: Distributing points for batch round %s with %d verified tasks", roundID, verifiedTasks)
+
+	// For batch rounds, we need to get the actual verified tasks from the batch verifier
+	// Since we don't have direct access to the individual task details here,
+	// we create a simplified batch points distribution based on the round summary
+
+	// Create a batch points distribution request
+	pointsReq := &points.PointsDistributionRequest{
+		BatchID:     fmt.Sprintf("pocw-batch-%s", roundID),
+		TriggerType: "pocw_batch_consensus_approved",
+		Timestamp:   time.Now(),
+		Tasks:       []points.TaskVLC{}, // Will be populated below
+	}
+
+	// For now, create a representative entry for the batch
+	// In a full implementation, this would iterate through actual verified tasks
+	if verifiedTasks > 0 {
+		batchTaskVLC := points.TaskVLC{
+			UserWallet: "batch_processing", // Special wallet for batch operations
+			TaskType:   string(models.TwitterRetweetTask),
+			VLCValue:   verifiedTasks, // Total VLC value for all verified tasks
+			TaskID:     roundID,
+		}
+		pointsReq.Tasks = append(pointsReq.Tasks, batchTaskVLC)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if _, err := rc.pointsClient.DistributePoints(ctx, pointsReq); err != nil {
+		log.Printf("Failed to distribute batch points for round %s: %v", roundID, err)
+	} else {
+		log.Printf("✅ Batch points distributed successfully for round %s (%d verified tasks)", roundID, verifiedTasks)
+	}
+
+	// Note: In a full implementation, you would:
+	// 1. Store individual task details in the BatchVerificationRound
+	// 2. Iterate through each verified task and create individual TaskVLC entries
+	// 3. This would ensure proper per-user points distribution
+}
+
+// distributeIndividualTaskPoints distributes points for an individual task after consensus
+func (rc *RoundCoordinator) distributeIndividualTaskPoints(task *models.Task) {
+	if rc.pointsClient == nil {
+		log.Printf("No points client available for task %s", task.ID)
+		return
+	}
+
+	log.Printf("🎯 PoCW Consensus Approved: Distributing points for task %s", task.ID)
+
+	taskVLC := points.TaskVLC{
+		UserWallet: task.UserWallet,
+		TaskType:   string(task.TaskType),
+		VLCValue:   1, // VLC value for this task
+		TaskID:     task.ID,
+	}
+
+	pointsReq := &points.PointsDistributionRequest{
+		BatchID:     fmt.Sprintf("pocw-consensus-%s", task.ID),
+		TriggerType: "pocw_consensus_approved",
+		Timestamp:   time.Now(),
+		Tasks:       []points.TaskVLC{taskVLC},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if _, err := rc.pointsClient.DistributePoints(ctx, pointsReq); err != nil {
+		log.Printf("Failed to distribute points for task %s: %v", task.ID, err)
+	} else {
+		log.Printf("✅ Points distributed successfully for task %s", task.ID)
+	}
 }
 
 // Helper methods
@@ -611,11 +787,47 @@ func (rc *RoundCoordinator) simulateQualityVoting(round *Round) error {
 }
 
 // getTasksForRound gets tasks that should be processed in this round
+// Now processes completed batch verification rounds for PoCW consensus
 func (rc *RoundCoordinator) getTasksForRound(ctx context.Context) ([]*models.Task, error) {
-	// For now, return empty slice - in real implementation, this would query
-	// for verified Twitter tasks or other tasks ready for final processing
-	// TODO: Implement actual task querying based on status and timestamp
-	return []*models.Task{}, nil
+	if rc.batchVerifier == nil {
+		log.Printf("No batch verifier available for round coordination")
+		return []*models.Task{}, nil
+	}
+
+	// Check for completed batch verification rounds
+	select {
+	case batchRound := <-rc.batchVerifier.GetCompletedRounds():
+		log.Printf("Processing batch verification round %s for PoCW consensus", batchRound.RoundID)
+
+		// Create a synthetic task representing the batch round for PoCW consensus
+		batchTask := &models.Task{
+			ID:         fmt.Sprintf("batch_round_%s", batchRound.RoundID),
+			TaskType:   batchRound.TaskType,
+			UserWallet: "batch_verifier", // Special identifier for batch operations
+			Status:     models.TaskVerified,
+			Payload: map[string]interface{}{
+				"round_id":             batchRound.RoundID,
+				"task_type":            batchRound.TaskType,
+				"total_tasks":          batchRound.TotalTasks,
+				"verified_tasks":       batchRound.VerifiedTasks,
+				"failed_tasks":         batchRound.FailedTasks,
+				"verification_summary": batchRound.VerificationSummary,
+			},
+			VLCClock:  batchRound.VLCAfter,
+			CreatedAt: batchRound.StartTime,
+			UpdatedAt: time.Now(),
+		}
+
+		if batchRound.EndTime != nil {
+			batchTask.CompletedAt = batchRound.EndTime
+		}
+
+		return []*models.Task{batchTask}, nil
+
+	default:
+		// No completed rounds available
+		return []*models.Task{}, nil
+	}
 }
 
 // simulateQualityVote simulates a validator's quality vote

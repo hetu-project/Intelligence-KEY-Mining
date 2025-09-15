@@ -93,7 +93,7 @@ func main() {
 	validatorScheduler := services.NewValidatorScheduler(taskService, taskCreationVerifier, batchVerifier, cfg.ValidatorPollIntervalSeconds)
 
 	// Initialize Round Coordinator for PoCoW round lifecycle management
-	roundCoordinator := services.NewRoundCoordinator(taskService, enhancedVLCService, validatorClient, cfg.ValidatorPollIntervalSeconds)
+	roundCoordinator := services.NewRoundCoordinator(taskService, enhancedVLCService, validatorClient, batchVerifier, pointsServiceURL, cfg.ValidatorPollIntervalSeconds, cfg.ConsensusDelaySeconds)
 
 	// Start async services
 	ctx := context.Background()

@@ -125,3 +125,39 @@ type BatchVerificationInfo struct {
 	UnverifiedTasks int `json:"unverified_tasks"`
 	VLCIncrement    int `json:"vlc_increment"`
 }
+
+// BatchVerificationRound represents a batch verification round for PoCW consensus
+type BatchVerificationRound struct {
+	RoundID             string                 `json:"round_id"`
+	StartTime           time.Time              `json:"start_time"`
+	EndTime             *time.Time             `json:"end_time,omitempty"`
+	TaskType            TaskType               `json:"task_type"`
+	TotalTasks          int                    `json:"total_tasks"`
+	VerifiedTasks       int                    `json:"verified_tasks"`
+	FailedTasks         int                    `json:"failed_tasks"`
+	Tasks               []*Task                `json:"tasks"`
+	VerificationSummary map[string]interface{} `json:"verification_summary"`
+	VLCBefore           *vlc.VectorClock       `json:"vlc_before"`
+	VLCAfter            *vlc.VectorClock       `json:"vlc_after"`
+	Status              string                 `json:"status"` // "processing", "completed", "failed"
+}
+
+// BatchRoundResult represents the result of a batch verification round
+type BatchRoundResult struct {
+	RoundID      string                 `json:"round_id"`
+	Success      bool                   `json:"success"`
+	TaskResults  map[string]TaskResult  `json:"task_results"` // task_id -> result
+	TotalTasks   int                    `json:"total_tasks"`
+	SuccessTasks int                    `json:"success_tasks"`
+	FailedTasks  int                    `json:"failed_tasks"`
+	VLCIncrement int                    `json:"vlc_increment"`
+	Summary      map[string]interface{} `json:"summary"`
+}
+
+// TaskResult represents individual task verification result within a batch round
+type TaskResult struct {
+	TaskID   string                 `json:"task_id"`
+	Success  bool                   `json:"success"`
+	Reason   string                 `json:"reason,omitempty"`
+	Evidence map[string]interface{} `json:"evidence,omitempty"`
+}
