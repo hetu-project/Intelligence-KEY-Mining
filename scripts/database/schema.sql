@@ -245,11 +245,11 @@ DELIMITER ;
 -- 7. Index Optimization
 -- ============================================
 
--- Composite indexes
-CREATE INDEX IF NOT EXISTS idx_tasks_user_status ON tasks(user_wallet, status);
-CREATE INDEX IF NOT EXISTS idx_tasks_type_status ON tasks(task_type, status);
-CREATE INDEX IF NOT EXISTS idx_validation_records_event_validator ON validation_records(event_id, validator_id);
-CREATE INDEX IF NOT EXISTS idx_points_history_wallet_date ON points_history(wallet_address, date);
+-- Composite indexes (MySQL 8.0 compatible)
+CREATE INDEX idx_tasks_user_status ON tasks(user_wallet, status);
+CREATE INDEX idx_tasks_type_status ON tasks(task_type, status);
+CREATE INDEX idx_validation_records_event_validator ON validation_records(event_id, validator_id);
+CREATE INDEX idx_points_history_wallet_date ON points_history(wallet_address, date);
 
 -- ============================================
 -- 8. Views
