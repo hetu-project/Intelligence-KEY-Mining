@@ -177,13 +177,14 @@ END //
 DELIMITER ;
 
 -- ============================================
--- 7. Permission updates
+-- 7. Permission updates (Skipped in Docker environment)
 -- ============================================
 
 -- Grant permissions for new tables
-GRANT SELECT, INSERT, UPDATE, DELETE ON twitter_verification_metrics TO 'miner_service'@'%';
-GRANT SELECT, INSERT, UPDATE, DELETE ON twitter_verification_logs TO 'miner_service'@'%';
-GRANT SELECT ON twitter_verification_monitoring TO 'miner_service'@'%';
+-- Note: Skipping GRANT statements in Docker environment
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON twitter_verification_metrics TO 'miner_service'@'%';
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON twitter_verification_logs TO 'miner_service'@'%';
+-- GRANT SELECT ON twitter_verification_monitoring TO 'miner_service'@'%';
 
 -- ============================================
 -- 8. Record migration
