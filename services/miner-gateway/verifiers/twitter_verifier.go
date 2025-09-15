@@ -38,9 +38,9 @@ func (tv *TwitterVerifier) ValidatePayload(payload map[string]interface{}) error
 		return fmt.Errorf("tweet_id is required")
 	}
 
-	twitterID, exists := payload["twitter_id"]
-	if !exists || twitterID == "" {
-		return fmt.Errorf("twitter_id is required")
+	twitterUsername, exists := payload["twitter_username"]
+	if !exists || twitterUsername == "" {
+		return fmt.Errorf("twitter_username is required")
 	}
 
 	return nil
