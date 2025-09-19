@@ -20,12 +20,12 @@ type TaskVLC struct {
 	TaskID     string `json:"task_id"`                         // Task ID (optional, for records)
 }
 
-// PointsDistributionResult points distribution result
+// PointsDistributionResult points distribution result - NEW: VLC directly equals points
 type PointsDistributionResult struct {
 	BatchID          string             `json:"batch_id"`
-	TotalPoolPoints  int                `json:"total_pool_points"`  // Total points pool
-	CreationPoints   int                `json:"creation_points"`    // Creation task points pool
-	RetweetPoints    int                `json:"retweet_points"`     // Retweet task points pool
+	TotalPoolPoints  int                `json:"total_pool_points"`  // NEW: Total actually distributed points
+	CreationPoints   int                `json:"creation_points"`    // NEW: Total creation VLC (equals creation points)
+	RetweetPoints    int                `json:"retweet_points"`     // NEW: Total retweet VLC (equals retweet points)
 	TotalCreationVLC int                `json:"total_creation_vlc"` // Total creation VLC
 	TotalRetweetVLC  int                `json:"total_retweet_vlc"`  // Total retweet VLC
 	UserAllocations  []UserPointsResult `json:"user_allocations"`   // User allocation results
@@ -57,20 +57,20 @@ type PointsRecord struct {
 	CreatedAt     time.Time `json:"created_at" db:"created_at"`
 }
 
-// PointsConfig points configuration
+// PointsConfig points configuration - NEW: Simplified for direct VLC-to-points mapping
 type PointsConfig struct {
-	TotalPoolPoints int     `json:"total_pool_points"` // Total points pool per round, default 100
-	CreationRatio   float64 `json:"creation_ratio"`    // Creation task ratio, default 0.4
-	RetweetRatio    float64 `json:"retweet_ratio"`     // Retweet task ratio, default 0.6
+	TotalPoolPoints int     `json:"total_pool_points"` // DEPRECATED: No longer used (kept for API compatibility)
+	CreationRatio   float64 `json:"creation_ratio"`    // DEPRECATED: No longer used (kept for API compatibility)
+	RetweetRatio    float64 `json:"retweet_ratio"`     // DEPRECATED: No longer used (kept for API compatibility)
 	HistoryLimit    int     `json:"history_limit"`     // History record limit, default 1000
 }
 
-// DefaultPointsConfig default points configuration
+// DefaultPointsConfig default points configuration - NEW: Simplified
 func DefaultPointsConfig() *PointsConfig {
 	return &PointsConfig{
-		TotalPoolPoints: 100,
-		CreationRatio:   0.4,
-		RetweetRatio:    0.6,
+		TotalPoolPoints: 0,   // DEPRECATED: No longer relevant
+		CreationRatio:   1.0, // DEPRECATED: No longer relevant
+		RetweetRatio:    1.0, // DEPRECATED: No longer relevant
 		HistoryLimit:    1000,
 	}
 }

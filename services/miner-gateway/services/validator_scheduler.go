@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hetu-project/Intelligence-KEY-Mining/pkg/points"
 	"github.com/hetu-project/Intelligence-KEY-Mining/services/miner-gateway/models"
 	"github.com/hetu-project/Intelligence-KEY-Mining/services/miner-gateway/verifiers"
 )
@@ -17,6 +18,7 @@ type ValidatorScheduler struct {
 	taskService          *TaskService
 	taskCreationVerifier *verifiers.TaskCreationVerifier
 	batchVerifier        *BatchVerifier
+	pointsClient         *points.Client // New: for TaskCreation points distribution
 
 	// Scheduling configuration
 	pollInterval time.Duration
@@ -34,13 +36,22 @@ func NewValidatorScheduler(
 	taskService *TaskService,
 	taskCreationVerifier *verifiers.TaskCreationVerifier,
 	batchVerifier *BatchVerifier,
+	pointsServiceURL string,
 	pollIntervalSeconds int,
 ) *ValidatorScheduler {
 	pollInterval := time.Duration(pollIntervalSeconds) * time.Second
+
+	// Initialize points client for TaskCreation immediate points distribution
+	var pointsClient *points.Client
+	if pointsServiceURL != "" {
+		pointsClient = points.NewClient(pointsServiceURL)
+	}
+
 	return &ValidatorScheduler{
 		taskService:          taskService,
 		taskCreationVerifier: taskCreationVerifier,
 		batchVerifier:        batchVerifier,
+		pointsClient:         pointsClient,
 		pollInterval:         pollInterval, // Use configurable interval
 		batchSize:            50,           // Process 50 tasks each time
 	}
@@ -151,6 +162,9 @@ func (vs *ValidatorScheduler) processTaskCreationTasks(ctx context.Context, task
 					log.Printf("Error updating TaskCreation status %s: %v", task.ID, err)
 				} else {
 					log.Printf("✅ TaskCreation %s completed successfully", task.ID)
+
+					// 🆕 NEW: Immediately distribute 50 points for TaskCreation
+					vs.distributeTaskCreationPoints(ctx, task)
 				}
 			} else {
 				// Validation failed
@@ -191,6 +205,48 @@ func (vs *ValidatorScheduler) validateTaskCreationPayload(payload map[string]int
 	}
 
 	return false
+}
+
+// distributeTaskCreationPoints immediately distributes 50 points for TaskCreation completion
+func (vs *ValidatorScheduler) distributeTaskCreationPoints(ctx context.Context, task *models.Task) {
+	if vs.pointsClient == nil {
+		log.Printf("No points client available for TaskCreation %s", task.ID)
+		return
+	}
+
+	log.Printf("💰 Distributing 50 points for TaskCreation %s to user %s", task.ID, task.UserWallet)
+
+	// Create points distribution request for TaskCreation (fixed 50 points)
+	taskVLC := points.TaskVLC{
+		UserWallet: task.UserWallet,
+		TaskType:   "creation",
+		VLCValue:   50, // Fixed 50 points for TaskCreation
+		TaskID:     task.ID,
+	}
+
+	pointsReq := &points.PointsDistributionRequest{
+		BatchID:     fmt.Sprintf("task-creation-%s", task.ID),
+		TriggerType: "task_creation_completed",
+		Timestamp:   time.Now(),
+		Tasks:       []points.TaskVLC{taskVLC},
+	}
+
+	// Distribute points with timeout
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	result, err := vs.pointsClient.DistributePoints(ctxWithTimeout, pointsReq)
+	if err != nil {
+		log.Printf("❌ Failed to distribute TaskCreation points for %s: %v", task.ID, err)
+	} else {
+		log.Printf("✅ TaskCreation points distributed successfully for %s", task.ID)
+		if result != nil && len(result.UserAllocations) > 0 {
+			userResult := result.UserAllocations[0]
+			if userResult.UpdateStatus == "success" {
+				log.Printf("   💰 User %s received %d points for TaskCreation", userResult.UserWallet[:10]+"...", userResult.RoundedPoints)
+			}
+		}
+	}
 }
 
 // batchVerifyTwitterTasks performs batch verification of Twitter retweet tasks

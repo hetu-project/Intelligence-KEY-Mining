@@ -33,7 +33,7 @@ func NewPointsService(db *sql.DB, config *models.PointsConfig) *PointsService {
 func (ps *PointsService) DistributePoints(ctx context.Context, req *models.PointsDistributionRequest) (*models.PointsDistributionResult, error) {
 	log.Printf("Starting points distribution for batch %s with %d tasks", req.BatchID, len(req.Tasks))
 
-	// 1. Calculate total VLC for each type
+	// 1. Calculate total VLC for each type (for logging purposes)
 	totalCreationVLC, totalRetweetVLC := ps.calculateTotalVLC(req.Tasks)
 
 	if totalCreationVLC == 0 && totalRetweetVLC == 0 {
@@ -45,22 +45,18 @@ func (ps *PointsService) DistributePoints(ctx context.Context, req *models.Point
 		}, fmt.Errorf("no VLC found for distribution")
 	}
 
-	// 2. Calculate points pool allocation
-	creationPoints := int(float64(ps.config.TotalPoolPoints) * ps.config.CreationRatio)
-	retweetPoints := int(float64(ps.config.TotalPoolPoints) * ps.config.RetweetRatio)
+	log.Printf("📊 VLC Stats - Creation: %d, Retweet: %d (NEW: VLC directly equals points)", totalCreationVLC, totalRetweetVLC)
 
-	log.Printf("VLC Stats - Creation: %d, Retweet: %d", totalCreationVLC, totalRetweetVLC)
-	log.Printf("Points Pool - Creation: %d, Retweet: %d", creationPoints, retweetPoints)
-
-	// 3. Aggregate VLC by user
+	// 2. Aggregate VLC by user
 	userVLCMap := ps.aggregateUserVLC(req.Tasks)
 
-	// 4. Calculate points allocation for each user
+	// 3. Calculate points allocation for each user (NEW: direct VLC-to-points mapping)
 	userAllocations := make([]models.UserPointsResult, 0, len(userVLCMap))
 	totalDistributedPoints := 0
 
 	for userWallet, vlcData := range userVLCMap {
-		result := ps.calculateUserPoints(userWallet, vlcData, creationPoints, retweetPoints, totalCreationVLC, totalRetweetVLC)
+		// Pass dummy values for pool-based params (no longer used)
+		result := ps.calculateUserPoints(userWallet, vlcData, 0, 0, 0, 0)
 		userAllocations = append(userAllocations, result)
 		totalDistributedPoints += result.RoundedPoints
 	}
@@ -89,9 +85,9 @@ func (ps *PointsService) DistributePoints(ctx context.Context, req *models.Point
 
 	result := &models.PointsDistributionResult{
 		BatchID:          req.BatchID,
-		TotalPoolPoints:  ps.config.TotalPoolPoints,
-		CreationPoints:   creationPoints,
-		RetweetPoints:    retweetPoints,
+		TotalPoolPoints:  totalDistributedPoints, // NEW: Total distributed points instead of pool
+		CreationPoints:   totalCreationVLC,       // NEW: Direct VLC values
+		RetweetPoints:    totalRetweetVLC,        // NEW: Direct VLC values
 		TotalCreationVLC: totalCreationVLC,
 		TotalRetweetVLC:  totalRetweetVLC,
 		UserAllocations:  userAllocations,
@@ -132,24 +128,26 @@ func (ps *PointsService) aggregateUserVLC(tasks []models.TaskVLC) map[string]map
 	return userVLCMap
 }
 
-// calculateUserPoints calculates individual user points
+// calculateUserPoints calculates individual user points - NEW: VLC directly corresponds to points
 func (ps *PointsService) calculateUserPoints(userWallet string, vlcData map[string]int, creationPoints, retweetPoints, totalCreationVLC, totalRetweetVLC int) models.UserPointsResult {
 	creationVLC := vlcData["creation"]
 	retweetVLC := vlcData["retweet"]
 
-	// Calculate points allocation
+	// NEW: VLC directly corresponds to points (1 VLC = 1 point)
+	// No more complex percentage-based distribution
 	var creationPointsEarned, retweetPointsEarned float64
 
-	if totalCreationVLC > 0 && creationVLC > 0 {
-		creationPointsEarned = float64(creationPoints) * float64(creationVLC) / float64(totalCreationVLC)
-	}
+	// For creation tasks: VLC value already represents the points (usually 50 for TaskCreation)
+	creationPointsEarned = float64(creationVLC)
 
-	if totalRetweetVLC > 0 && retweetVLC > 0 {
-		retweetPointsEarned = float64(retweetPoints) * float64(retweetVLC) / float64(totalRetweetVLC)
-	}
+	// For retweet tasks: VLC value directly equals points
+	retweetPointsEarned = float64(retweetVLC)
 
 	totalPoints := creationPointsEarned + retweetPointsEarned
 	roundedPoints := int(math.Round(totalPoints))
+
+	log.Printf("🎯 Direct VLC-to-Points for user %s: Creation VLC=%d → %d points, Retweet VLC=%d → %d points, Total=%d points",
+		userWallet[:10]+"...", creationVLC, int(creationPointsEarned), retweetVLC, int(retweetPointsEarned), roundedPoints)
 
 	return models.UserPointsResult{
 		UserWallet:     userWallet,

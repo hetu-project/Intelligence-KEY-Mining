@@ -90,7 +90,7 @@ func main() {
 	}
 	batchVerifier := services.NewBatchVerifier(taskService, enhancedVLCService, pointsServiceURL, 5, twitterVerificationSvc) // 5 workers
 	taskCreationVerifier := verifiers.NewTaskCreationVerifier()
-	validatorScheduler := services.NewValidatorScheduler(taskService, taskCreationVerifier, batchVerifier, cfg.ValidatorPollIntervalSeconds)
+	validatorScheduler := services.NewValidatorScheduler(taskService, taskCreationVerifier, batchVerifier, pointsServiceURL, cfg.ValidatorPollIntervalSeconds)
 
 	// Initialize Round Coordinator for PoCoW round lifecycle management
 	roundCoordinator := services.NewRoundCoordinator(taskService, enhancedVLCService, validatorClient, batchVerifier, pointsServiceURL, cfg.ValidatorPollIntervalSeconds, cfg.ConsensusDelaySeconds)
