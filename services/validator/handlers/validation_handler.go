@@ -58,9 +58,13 @@ func (h *ValidationHandler) ValidateTask(c *gin.Context) {
 		return
 	}
 
+	// Return vote in the format expected by miner-gateway
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    vote,
+		"success":   true,
+		"vote":      vote.Vote,   // "approve", "reject", "abstain"
+		"score":     vote.Score,  // Quality score 0.0-1.0
+		"weight":    vote.Weight, // Validator weight
+		"reasoning": vote.Reason, // Reasoning for the vote
 	})
 }
 

@@ -47,7 +47,9 @@ type Round struct {
 type QualityVote struct {
 	ValidatorID string                 `json:"validator_id"`
 	TaskID      string                 `json:"task_id"`
-	Vote        string                 `json:"vote"` // "approve", "reject", "abstain"
+	Vote        string                 `json:"vote"`   // "approve", "reject", "abstain"
+	Score       float64                `json:"score"`  // Quality score 0.0-1.0
+	Weight      float64                `json:"weight"` // Validator weight for BFT consensus
 	Reasoning   string                 `json:"reasoning"`
 	Timestamp   time.Time              `json:"timestamp"`
 	Metadata    map[string]interface{} `json:"metadata"`
@@ -61,6 +63,16 @@ type ConsensusResult struct {
 	Achieved  bool                   `json:"achieved"`
 	Timestamp time.Time              `json:"timestamp"`
 	Metadata  map[string]interface{} `json:"metadata"`
+}
+
+// TaskConsensusResult represents weighted consensus result for a single task
+type TaskConsensusResult struct {
+	TaskID            string        `json:"task_id"`
+	TotalWeight       float64       `json:"total_weight"`        // Sum of all validator weights
+	AcceptWeightVotes float64       `json:"accept_weight_votes"` // Sum of accept vote weights
+	RejectWeightVotes float64       `json:"reject_weight_votes"` // Sum of reject vote weights
+	VoteCount         int           `json:"vote_count"`          // Total number of votes
+	Votes             []QualityVote `json:"votes"`               // All votes for this task
 }
 
 // RoundCoordinator manages the lifecycle of processing rounds in PoCoW
@@ -354,37 +366,75 @@ func (rc *RoundCoordinator) qualityVotingPhase(round *Round) error {
 	return nil
 }
 
-// consensusPhase handles BFT consensus calculation
+// consensusPhase handles BFT consensus calculation using weighted voting
 func (rc *RoundCoordinator) consensusPhase(round *Round) error {
 	round.Phase = RoundPhaseConsensus
 
-	// Calculate consensus for each task
-	taskVotes := make(map[string]map[string]int)
+	// Calculate weighted consensus for each task (original demo style)
+	taskConsensus := make(map[string]*TaskConsensusResult)
 
 	for _, vote := range round.QualityVotes {
-		if taskVotes[vote.TaskID] == nil {
-			taskVotes[vote.TaskID] = make(map[string]int)
+		if taskConsensus[vote.TaskID] == nil {
+			taskConsensus[vote.TaskID] = &TaskConsensusResult{
+				TaskID:            vote.TaskID,
+				TotalWeight:       0,
+				AcceptWeightVotes: 0,
+				RejectWeightVotes: 0,
+				VoteCount:         0,
+				Votes:             make([]QualityVote, 0),
+			}
 		}
-		taskVotes[vote.TaskID][vote.Vote]++
+
+		result := taskConsensus[vote.TaskID]
+		result.TotalWeight += vote.Weight
+		result.VoteCount++
+		result.Votes = append(result.Votes, vote)
+
+		// Accumulate weighted votes
+		switch vote.Vote {
+		case "approve":
+			result.AcceptWeightVotes += vote.Weight
+		case "reject":
+			result.RejectWeightVotes += vote.Weight
+		case "abstain":
+			// Abstain votes don't count towards accept/reject but count towards total weight
+		}
 	}
 
-	// Determine overall consensus
+	// Determine overall consensus using BFT weighted algorithm
 	overallApproved := 0
 	overallRejected := 0
+	var consensusDetails []string
 
-	for taskID, votes := range taskVotes {
-		approved := votes["approve"]
-		rejected := votes["reject"]
+	for taskID, result := range taskConsensus {
+		// BFT consensus logic (similar to original demo):
+		// 1. Consensus achieved when >50% weight participates (we have 4.0 total weight)
+		// 2. Acceptance requires >50% of participating weight to vote "accept"
+		consensusAchieved := result.TotalWeight > 2.0 // >50% of 4.0 total weight
+		isAccepted := consensusAchieved && result.AcceptWeightVotes > (result.TotalWeight/2.0)
 
-		if approved >= rc.consensusThreshold {
-			overallApproved++
-			log.Printf("Task %s: APPROVED (%d votes)", taskID, approved)
-		} else if rejected >= rc.consensusThreshold {
-			overallRejected++
-			log.Printf("Task %s: REJECTED (%d votes)", taskID, rejected)
+		if consensusAchieved {
+			if isAccepted {
+				overallApproved++
+				consensusDetails = append(consensusDetails,
+					fmt.Sprintf("Task %s: APPROVED (%.2f/%.2f weight, %d votes)",
+						taskID, result.AcceptWeightVotes, result.TotalWeight, result.VoteCount))
+			} else {
+				overallRejected++
+				consensusDetails = append(consensusDetails,
+					fmt.Sprintf("Task %s: REJECTED (%.2f/%.2f weight, %d votes)",
+						taskID, result.AcceptWeightVotes, result.TotalWeight, result.VoteCount))
+			}
 		} else {
-			log.Printf("Task %s: NO CONSENSUS (approve: %d, reject: %d)", taskID, approved, rejected)
+			consensusDetails = append(consensusDetails,
+				fmt.Sprintf("Task %s: NO CONSENSUS (%.2f total weight < 2.0 required)",
+					taskID, result.TotalWeight))
 		}
+	}
+
+	// Log consensus details
+	for _, detail := range consensusDetails {
+		log.Printf("🎯 BFT Consensus: %s", detail)
 	}
 
 	// Create consensus result
@@ -754,10 +804,12 @@ func (rc *RoundCoordinator) makeValidatorHTTPRequest(ctx context.Context, valida
 
 	// Parse response
 	var validatorResp struct {
-		Success   bool   `json:"success"`
-		Vote      string `json:"vote"` // "approve", "reject", "abstain"
-		Reasoning string `json:"reasoning"`
-		Error     string `json:"error,omitempty"`
+		Success   bool    `json:"success"`
+		Vote      string  `json:"vote"`   // "approve", "reject", "abstain"
+		Score     float64 `json:"score"`  // Quality score 0.0-1.0
+		Weight    float64 `json:"weight"` // Validator weight
+		Reasoning string  `json:"reasoning"`
+		Error     string  `json:"error,omitempty"`
 	}
 
 	if err := json.Unmarshal(body, &validatorResp); err != nil {
@@ -773,6 +825,8 @@ func (rc *RoundCoordinator) makeValidatorHTTPRequest(ctx context.Context, valida
 		ValidatorID: validator.ID,
 		TaskID:      validationReq["task_id"].(string),
 		Vote:        validatorResp.Vote,
+		Score:       validatorResp.Score,
+		Weight:      validatorResp.Weight,
 		Reasoning:   validatorResp.Reasoning,
 		Timestamp:   time.Now(),
 		Metadata: map[string]interface{}{
@@ -791,6 +845,7 @@ func (rc *RoundCoordinator) simulateValidatorVote(validator ValidatorEndpoint, v
 	vote := QualityVote{
 		ValidatorID: validator.ID,
 		TaskID:      validationReq["task_id"].(string),
+		Weight:      float64(validator.Weight), // Use validator weight from endpoint config
 		Timestamp:   time.Now(),
 		Metadata: map[string]interface{}{
 			"validator_role": validator.Role,
@@ -800,24 +855,28 @@ func (rc *RoundCoordinator) simulateValidatorVote(validator ValidatorEndpoint, v
 		},
 	}
 
-	// Simulate validator-specific logic
+	// Simulate validator-specific logic with quality scores
 	switch validator.Role {
 	case "UserInterfaceValidator":
 		// Validator-1 focuses on user interaction and format validation
 		vote.Vote = "approve"
+		vote.Score = 0.80 // High confidence for UI validation
 		vote.Reasoning = "Task format and user interaction validated (simulated)"
 	case "ConsensusValidator":
 		// Other validators focus on quality assessment
 		taskType := validationReq["task_type"].(string)
 		if taskType == string(models.TwitterRetweetTask) {
 			vote.Vote = "approve"
+			vote.Score = 0.75 // Good quality for Twitter tasks
 			vote.Reasoning = "Twitter retweet task meets quality standards (simulated)"
 		} else {
 			vote.Vote = "approve"
+			vote.Score = 0.85 // High quality for task creation
 			vote.Reasoning = "Task creation meets quality standards (simulated)"
 		}
 	default:
 		vote.Vote = "abstain"
+		vote.Score = 0.50 // Neutral score for abstain
 		vote.Reasoning = "Unknown validator role (simulated)"
 	}
 
