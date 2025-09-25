@@ -1,0 +1,22 @@
+# Ignore everything not needed for build
+**/node_modules
+**/.git
+**/.gitignore
+**/README.md
+**/Dockerfile*
+**/.dockerignore
+**/docker-compose*
+**/.env*
+**/coverage.txt
+**/coverage.html
+**/*.log
+
+# Keep only necessary Go files
+!go.mod
+!go.sum
+!**/*.go
+!services/sbt-service/**
+
+# Ignore other services
+/services/*
+!/services/sbt-service
