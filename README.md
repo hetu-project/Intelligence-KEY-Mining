@@ -1,4 +1,4 @@
-# Intelligence-KEY-Mining Project
+# KEY Identity Hub - Intelligence Mining Platform
 
 ## Introduction
 Intelligence-KEY-Mining is a decentralized mining system that implements Proof of Cognitive Work (PoCW) consensus mechanism. The system consists of multiple microservices including miner-gateway, validators, points service, and SBT service, all working together to validate social tasks (like Twitter retweets) and distribute rewards.
@@ -353,15 +353,15 @@ sequenceDiagram
     RC->>RC: Update task status: VERIFIED
 ```
 
-## Key Processes and Technologies
+## Core Architecture & Technologies
 
-The system implements a sophisticated PoCW consensus mechanism that combines:
+This project builds a PoCW-based identity verification and reward system featuring:
+
 - **Vector Clocks (VLC)** for causal ordering and user progress tracking
 - **Multi-validator quality assessment** with specialized roles (UI, Format, Semantic)
-- **BFT consensus** with weighted voting for Byzantine fault tolerance
+- **Weighted BFT consensus** for Byzantine fault-tolerant voting
 - **Microservices architecture** with HTTP REST API communication
-- **Batch processing** for efficient consensus on multiple verified tasks
-- **Real-time API verification** for immediate user feedback
+- **Batch processing** for efficient multi-task consensus
 - **Direct VLC-to-points mapping** for transparent reward distribution
 
-This architecture ensures reliable validation of social tasks while maintaining decentralization and fault tolerance through the coordinated effort of multiple specialized validators.
+The architecture ensures reliable social task validation while maintaining decentralization through coordinated specialized validators.
