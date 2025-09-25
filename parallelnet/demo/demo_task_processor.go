@@ -13,7 +13,7 @@ package demo
 import (
 	"fmt"
 
-	"github.com/hetu-project/Intelligence-KEY-Mining/subnet"
+	"github.com/hetu-project/Intelligence-KEY-Mining/parallelnet"
 )
 
 // DemoTaskProcessor implements the TaskProcessor interface with predefined responses
@@ -33,23 +33,23 @@ func NewDemoTaskProcessor() *DemoTaskProcessor {
 }
 
 // ProcessTask implements the demo scenario logic
-func (d *DemoTaskProcessor) ProcessTask(input string, inputNumber int) (subnet.MinerOutputType, string, string) {
+func (d *DemoTaskProcessor) ProcessTask(input string, inputNumber int) (parallelnet.MinerOutputType, string, string) {
 	switch inputNumber {
 	case 3:
 		// Input 3: Miner requests more info → normal flow
 		fmt.Printf("Miner: Input %d - Requesting more information\n", inputNumber)
-		return subnet.NeedMoreInfo, "", "Could you please provide more context about what specific aspect you'd like me to focus on?"
+		return parallelnet.NeedMoreInfo, "", "Could you please provide more context about what specific aspect you'd like me to focus on?"
 
 	case 6:
 		// Input 6: Miner requests more info → will eventually be rejected by user
 		fmt.Printf("Miner: Input %d - Requesting more information (will be rejected later)\n", inputNumber)
-		return subnet.NeedMoreInfo, "", "I need clarification on the technical requirements. Could you specify the exact parameters?"
+		return parallelnet.NeedMoreInfo, "", "I need clarification on the technical requirements. Could you specify the exact parameters?"
 
 	default:
 		// Normal processing for inputs 1, 2, 4, 5, 7
 		output := d.generateOutput(input, inputNumber)
 		fmt.Printf("Miner: Input %d - Generated output: %s\n", inputNumber, output)
-		return subnet.OutputReady, output, ""
+		return parallelnet.OutputReady, output, ""
 	}
 }
 

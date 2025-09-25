@@ -3,7 +3,7 @@
 // This file defines the message types used in the PoCW subnet protocol and implements
 // the consensus logic for aggregating validator votes. All messages support VLC clocks
 // for causal consistency and cryptographic signatures for authenticity.
-package subnet
+package parallelnet
 
 import (
 	"github.com/hetu-project/Intelligence-KEY-Mining/vlc"
