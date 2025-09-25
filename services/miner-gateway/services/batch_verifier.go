@@ -152,13 +152,10 @@ func (bv *BatchVerifier) worker(ctx context.Context, workerID int) {
 func (bv *BatchVerifier) processTask(ctx context.Context, task *models.Task, workerID int) {
 	log.Printf("Worker %d processing task %s (type: %s)", workerID, task.ID, task.TaskType)
 
-	// Twitter任务处理 - 完整容错策略
 	if task.TaskType == models.TwitterRetweetTask {
 		if bv.twitterVerificationSvc != nil {
-			// 有验证服务，尝试验证
 			result, err := bv.twitterVerificationSvc.VerifyTwitterRetweetTask(ctx, task)
 			if err != nil {
-				// 这种情况理论上不应该发生，因为VerifyTwitterRetweetTask不返回error
 				log.Printf("Unexpected error in Twitter verification: %v", err)
 				bv.handleTwitterTaskAsIncomplete(ctx, task, fmt.Errorf("verification service error: %v", err))
 				return
@@ -172,14 +169,12 @@ func (bv *BatchVerifier) processTask(ctx context.Context, task *models.Task, wor
 				bv.handleTwitterTaskAsIncomplete(ctx, task, result.Error)
 			}
 		} else {
-			// 没有验证服务，标记为未完成
 			log.Printf("Worker %d: Twitter verification service not available, marking task %s as incomplete", workerID, task.ID)
 			bv.handleTwitterTaskAsIncomplete(ctx, task, fmt.Errorf("Twitter verification service not configured"))
 		}
 		return
 	}
 
-	// 其他任务类型的处理...
 	bv.processTaskLegacy(ctx, task, workerID)
 }
 
@@ -466,7 +461,7 @@ func (bv *BatchVerifier) handleVerificationSuccess(ctx context.Context, task *mo
 	bv.trackTaskCompletion(task.ID, true)
 }
 
-// handleTwitterTaskAsIncomplete 处理Twitter任务为未完成状态 - 统一容错处理
+// handleTwitterTaskAsIncomplete
 func (bv *BatchVerifier) handleTwitterTaskAsIncomplete(ctx context.Context, task *models.Task, reason error) {
 	var reasonStr string
 	if reason != nil {
@@ -485,10 +480,8 @@ func (bv *BatchVerifier) handleTwitterTaskAsIncomplete(ctx context.Context, task
 
 	proofJSON, _ := json.Marshal(proofData)
 
-	// 状态管理策略
 	status := models.TaskPendingVerification
 	if task.Attempts >= 3 {
-		// 超过重试次数，标记为需要人工处理
 		status = models.TaskPendingReview
 		log.Printf("Task %s moved to PENDING_REVIEW after %d attempts", task.ID, task.Attempts)
 	}
@@ -497,7 +490,6 @@ func (bv *BatchVerifier) handleTwitterTaskAsIncomplete(ctx context.Context, task
 		log.Printf("Failed to update task status for %s: %v", task.ID, err)
 	}
 
-	// 不增加VLC，不分发积分 - 这是关键的容错策略
 	log.Printf("Task %s marked as incomplete due to: %v", task.ID, reasonStr)
 
 	// Track task completion in current batch round

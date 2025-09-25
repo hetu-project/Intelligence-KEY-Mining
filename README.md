@@ -1,478 +1,367 @@
-# Intelligence KEY Mining - Proof-of-Causal-Work System
+# Intelligence-KEY-Mining Project
 
-A blockchain-based consensus mechanism that mines soulbound **KEY tokens** through verified AI intelligence work, implementing Vector Logical Clocks (VLC) for causal ordering and Byzantine Fault Tolerant consensus.
-
-## Overview
-
-This system demonstrates a novel approach to cryptocurrency mining where tokens are earned through actual valuable AI work rather than computational waste. The **KEY token** represents verifiable intelligence contributions and is non-transferable (soulbound) but redeemable.
-
-### Key Features
-
-- 🧠 **Intelligence Mining**: Earn KEY tokens through actual AI task completion
-- 🔗 **Vector Logical Clocks**: Causal ordering of distributed consensus events  
-- 🏛️ **Byzantine Fault Tolerant**: 4-validator consensus with quality assessment
-- 💎 **Soulbound Tokens**: Non-transferable but redeemable KEY tokens
-- 📊 **Real-time Visualization**: VLC event graph via Dgraph
-- ⛓️ **Blockchain Integration**: Smart contracts on Anvil/Ethereum
-
-## Architecture
-
-```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Subnet        │    │   Bridge         │    │   Blockchain    │
-│                 │    │                  │    │                 │
-│ Miner + 4       │◄──►│ HTTP Server      │◄──►│ Smart Contracts │
-│ Validators      │    │ (Port 3001)      │    │ (Anvil)         │
-│                 │    │                  │    │                 │
-│ VLC Consensus   │    │ Per-epoch        │    │ KEY Mining      │
-└─────────────────┘    │ Submission       │    │ Token Rewards   │
-         │              └──────────────────┘    └─────────────────┘
-         ▼
-┌─────────────────┐
-│   Dgraph        │
-│   VLC Graph     │
-│   Visualization │
-└─────────────────┘
-```
-
-## Two Execution Modes
-
-### 1. Subnet-Only Mode 🔹
-
-**Purpose**: Pure subnet consensus demonstration with VLC visualization (no blockchain integration)
-
-**What it does**:
-- ✅ Runs distributed consensus with 1 miner + 4 validators
-- ✅ Processes 7 rounds of AI tasks with quality assessment  
-- ✅ Generates VLC event graph for causal analysis
-- ✅ Provides interactive exploration of consensus behavior
-- ❌ No blockchain integration or KEY token mining
-
-**Run Command**:
-```bash
-./run-subnet-only.sh
-```
-
-**Access Points**:
-- 📊 VLC Graph: `http://localhost:8000` (Dgraph Ratel UI)
-- 📋 Event Query: `http://localhost:8080/graphql`
-
-### 2. KEY Mining Mode 💰
-
-**Purpose**: Complete PoCW system with real KEY token mining and blockchain integration
-
-**What it does**:
-- ✅ Everything from subnet-only mode PLUS:
-- ✅ Deploys smart contracts (KEY Token, PoCW Verifier, etc.)
-- ✅ Real-time KEY mining per epoch (every 3 rounds)
-- ✅ Blockchain transactions with verified rewards
-- ✅ Bridge service for epoch submission
-- ✅ Complete before/after balance tracking
-
-**Run Command**:
-```bash
-./run-key-mining.sh
-```
-
-**Access Points**:
-- 📊 VLC Graph: `http://localhost:8000`
-- 🔍 Blockchain Inspector: `http://localhost:3000/pocw-inspector.html`
-- ⛓️ Blockchain RPC: `http://localhost:8545`
-- 🌐 Bridge API: `http://localhost:3001`
-
-## Prerequisites
-
-### Required Software
-```bash
-# Install Foundry (for Anvil and Cast)
-curl -L https://foundry.paradigm.xyz | bash
-foundryup
-
-# Install Go >= 1.21
-# Install Node.js >= 22
-# Install Docker (for Dgraph)
-# Install bc (for calculations)
-sudo apt install bc
-```
-
-### System Requirements
-- **Ports**: 3000, 3001, 8000, 8080, 8545, 9080 (must be available)
-- **Docker**: Required for Dgraph container
-- **Sudo Access**: Required for Docker operations
+## Introduction
+Intelligence-KEY-Mining is a decentralized mining system that implements Proof of Cognitive Work (PoCW) consensus mechanism. The system consists of multiple microservices including miner-gateway, validators, points service, and SBT service, all working together to validate social tasks (like Twitter retweets) and distribute rewards.
 
 ## Quick Start
 
-### Option 1: Subnet-Only Demo
+### 1. Navigate to Project Directory
 ```bash
-# Clean run of subnet consensus with VLC visualization
-sudo ./run-subnet-only.sh
-
-# Access VLC graph at http://localhost:8000
-# Press Ctrl+C when done exploring
+cd /path/to/Intelligence-KEY-Mining
 ```
 
-### Option 2: Full KEY Mining Demo  
+### 2. Generate Environment Configuration File
 ```bash
-# Complete PoCW system with blockchain integration
-sudo ./run-key-mining.sh
+# Interactive mode (recommended)
+bash scripts/setup-env.sh interactive
 
-# Watch KEY tokens being mined in real-time
-# Explore blockchain inspector at http://localhost:3000/pocw-inspector.html
-# Bridge stays active for continued mining
-# Press Ctrl+C when done
+# Or simple mode
+bash scripts/setup-env.sh create
 ```
 
-## Smart Contracts
+### 3. Configure Environment Variables
+Edit the generated `.env` file with your actual parameters. The script will automatically highlight required modifications.
 
-| Contract | Purpose | Features |
-|----------|---------|----------|
-| **KEYToken** | Soulbound intelligence tokens | Non-transferable, 21M max supply |
-| **HETUToken** | Staking for subnet registration | ERC20, 1M total supply |
-| **SubnetRegistry** | Manages subnet participants | Deposit requirements, validation |
-| **EnhancedPoCWVerifier** | Consensus verification & mining | Per-epoch KEY distribution |
-
-## Expected Output
-
-### Subnet-Only Mode
-```
-🔹 PoCW SUBNET-ONLY DEMONSTRATION
-Architecture: Pure subnet consensus with VLC graph visualization
-
-✅ 7 rounds processed with Byzantine consensus
-✅ VLC events committed to Dgraph
-🔄 Interactive mode - explore at http://localhost:8000
-```
-
-### KEY Mining Mode
-```
-💰 PoCW KEY MINING SYSTEM  
-Architecture: Complete KEY mining with blockchain integration
-
-💰 Initial KEY Token Balances (Before Mining)
-📊 Miner: 0.000000 KEY
-📊 Validator-1: 0.000000 KEY
-...
-
-[CONSENSUS & MINING HAPPENS]
-
-💰 Final KEY Token Balances (After Mining)
-📊 Miner: 400.000000 KEY (+400.000000 KEY mined)
-📊 Validator-1: 25.000000 KEY (+25.000000 KEY mined)
-📊 Total Supply: 500.000000 KEY (+500.000000 KEY total mined)
-
-🎉 Bridge stays running for continued KEY mining!
-```
-
-## Key Concepts
-
-### Epochs & Rounds
-- **Round**: Single AI task with miner output + validator consensus
-- **Epoch**: 3 consecutive rounds
-- **Mining Trigger**: Each completed epoch triggers KEY token mining
-
-### VLC (Vector Logical Clocks)
-- Ensures causal ordering of distributed events
-- Tracks happened-before relationships
-- Prevents Byzantine inconsistencies
-- Visualized as directed graphs in Dgraph
-
-### KEY Token Economics
-- **Mining Rate**: Based on successful task completion
-- **Distribution**: 80% to miner, 20% split among validators
-- **Soulbound**: Cannot be transferred, but can be redeemed
-- **Max Supply**: 21 million KEY (like Bitcoin)
-
-## Troubleshooting
-
-### Common Issues
-
-**Port Conflicts**:
+### 4. Start Core Services
 ```bash
-# Check what's using required ports
-netstat -tlnp | grep -E ":(3000|3001|8000|8080|8545|9080)"
-# Kill conflicting processes if needed
+# One-click startup script
+bash scripts/start-core-services.sh
 ```
 
-**Docker Permissions**:
+The startup script automatically handles:
+- Dependency checks
+- Infrastructure startup (MySQL, Redis, Dgraph)
+- Database migrations (if needed)
+- Core service initialization
+- Health checks
+
+### Service Management Commands
+
+**Rebuild and restart after code changes:**
 ```bash
-# Run the scripts with sudo to handle Docker operations
-sudo ./run-subnet-only.sh
-sudo ./run-key-mining.sh
+docker-compose stop miner-gateway
+docker-compose build miner-gateway  
+docker-compose up -d miner-gateway
 ```
 
-**Bridge Connection Errors**:
-- Ensure Node.js dependencies are installed: `npm install`
-- Bridge starts after contract deployment in key-mining mode
-- Check bridge health: `curl http://localhost:3001/health`
-
-**Dgraph Issues**:
-- Wait 30+ seconds for Dgraph container to fully start
-- Try accessing Ratel UI directly: `http://localhost:8000`
-- Check container: `docker ps | grep dgraph`
-
-### Clean Restart
+**Real-time log monitoring:**
 ```bash
-# If anything gets stuck, clean everything:
-pkill anvil
-sudo docker stop dgraph-standalone
-sudo docker rm dgraph-standalone  
-sudo rm -rf ./dgraph-data
-rm -f contract_addresses.json *.log *.pid
+# Twitter-related logs only
+docker-compose logs -f miner-gateway | grep -i twitter
+
+# Verification-related logs
+docker-compose logs -f miner-gateway | grep -i "verif\|batch"
+
+# Check task creation
+docker-compose logs miner-gateway | grep "Task created"
+
+# Check task status
+docker-compose logs miner-gateway | grep "PENDING_VERIFICATION"
 ```
 
-## 🏗️ Architecture Overview
+## Environment Variables Configuration
 
-### Core Components
-
-**🤖 CoreMiner**
-- AI agents that process user tasks and requests
-- Maintain Vector Logical Clock (VLC) consistency
-- Generate responses and request additional context when needed
-- Process 7 different test scenarios demonstrating various interaction patterns
-
-**🛡️ CoreValidator** 
-- Quality assessment nodes that vote on miner outputs
-- Two specialized roles:
-  - **UserInterfaceValidator**: Handles user interaction and info requests
-  - **ConsensusValidator**: Performs distributed quality voting
-- Byzantine Fault Tolerant consensus with 0.25 weight per validator
-- Validates VLC sequences and ensures causal consistency
-
-**⏰ Vector Logical Clocks (VLC)**
-- Ensures causal ordering of all operations
-- Tracks dependencies between events across the network
-- Prevents out-of-order execution and maintains consistency
-- Critical for distributed consensus and event validation
-
-**📊 Graph Visualization**
-- Real-time VLC event tracking via Dgraph database
-- Interactive visualization of causal relationships
-- Event categorization: UserInput, MinerOutput, InfoRequest, RoundSuccess, etc.
-- Complete audit trail of all network interactions
-
-## 🎯 Demonstration Scenarios
-
-The subnet demo processes **7 test scenarios** that showcase all aspects of the PoCW protocol:
-
-### Standard Processing (Scenarios 1, 2, 5, 7)
-- **User Input**: "Analyze market trends for Q4"
-- **Miner Response**: Direct solution generation
-- **Validator Assessment**: Quality voting and consensus
-- **User Feedback**: Acceptance confirmation
-- **Result**: `OUTPUT DELIVERED TO USER`
-
-### Information Request Flow (Scenarios 3, 6)  
-- **User Input**: "Create optimization strategy for resource allocation"
-- **Miner Behavior**: Requests additional context
-- **Validator Mediation**: Facilitates user-miner communication
-- **Enhanced Processing**: Solution with additional context
-- **Advanced Validation**: Quality assessment of refined output
-
-### Rejection Scenarios (Scenario 4)
-- **Validator Rejection**: Low-quality output rejected by consensus (0.45 quality score)
-- **Result**: `OUTPUT REJECTED BY VALIDATORS`
-
-### User Override (Scenario 6)
-- **Validator Acceptance**: Output passes validator consensus
-- **User Rejection**: User rejects despite validator approval
-- **Result**: `OUTPUT REJECTED BY USER (despite validator acceptance)`
-
-## 📊 Visualizing Event Graphs
-
-After running the demonstration, visualize the complete VLC event graph:
-
-### Access Steps
-1. **Open Ratel UI**: http://localhost:8000
-2. **Verify Connection**: Ensure connection shows `localhost:8080`
-3. **Query Events**: Use this GraphQL query to view all subnet events:
-
-```graphql
-{
-  events(func: has(event_id)) {
-    uid
-    event_id
-    event_name  
-    event_type
-    subnet_id
-    request_id
-    vlc_clock
-    parents {
-      uid
-      event_id
-      event_name
-    }
-    timestamp
-    description
-  }
-}
+### 1. Database Configuration
+*Purpose: All services require MySQL connection for storing tasks, points, and user data*
+```bash
+MYSQL_ROOT_PASSWORD=your_secure_root_password
+MYSQL_DATABASE=pocw_db
+MYSQL_USER=pocw_user
+MYSQL_PASSWORD=pocw_password
+DATABASE_URL=mysql://pocw_user:pocw_password@localhost:3306/pocw_db
 ```
 
-### Event Types in Subnet Demo
-- **🎯 UserInput**: User task submissions (7 scenarios)
-- **🤖 MinerOutput**: AI agent responses and solutions
-- **❓ InfoRequest**: Miner requests for additional context  
-- **💬 InfoResponse**: User-provided clarifications
-- **✅ RoundSuccess**: Successful consensus rounds
-- **❌ RoundFailed**: Failed validation or user rejection
-- **🏁 EpochFinalized**: Subnet epoch completion markers
-- **⭐ GenesisState**: Initial subnet state
-
-### Understanding VLC Relationships
-- **Parent Links**: Show causal dependencies between events
-- **VLC Clocks**: Demonstrate proper ordering (format: `{miner:X, validator:Y}`)
-
-The graph provides a complete audit trail showing how each user request flows through the subnet, demonstrating the causal consistency guarantees of the PoCW protocol.
-
-## 🧠 Intelligence Money & PoCW Protocol
-
-### Proof-of-Causal-Work Consensus
-
-PoCW extends traditional blockchain consensus by focusing on **causal relationships** rather than just computational work:
-
-**🔗 Causal Consistency**
-- Every event must reference its causal dependencies
-- Vector Logical Clocks ensure proper ordering across distributed nodes
-- Invalid causal relationships are automatically rejected
-- Creates immutable audit trail of decision-making processes
-
-**🏛️ Byzantine Fault Tolerant Consensus**  
-- 4 validators with 0.25 weight each (total weight = 1.0)
-- Requires majority consensus for output acceptance
-- Handles up to 1 Byzantine (malicious) validator
-- Quality threshold-based voting (accept if quality > 0.5)
-
-**⚡ Event-Driven Architecture**
-- Real-time processing of user requests
-- Dynamic info request/response cycles
-- Asynchronous validator consensus
-- Complete traceability of all interactions 
-
-### Blockchain Integration Architecture
-
-PoCW subnets can be bridged to mainnet blockchains for broader ecosystem integration:
-
-```
-🔄 Subnet to Mainnet Flow:
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   PoCW Subnet   │───▶│  Epoch Finalize  │───▶│  Mainnet Post   │
-│                 │    │                  │    │                 │
-│ • Miners        │    │ • VLC State      │    │ • Smart Contract│
-│ • Validators    │    │ • Consensus      │    │ • TOKEN Mining  │
-│ • VLC Graph     │    │                  │    │ • Verification  │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
+### 2. Blockchain Configuration
+*Purpose: SBT service for Ethereum interaction and SBT management*
+```bash
+ETH_RPC_URL=https://sepolia.infura.io/v3/your_project_id
+SBT_CONTRACT_ADDRESS=0x...
+SBT_CONTRACT_PRIVATE_KEY=0x...
 ```
 
-## 💰 Intelligence Money (KEY Tokens)
-
-### Revolutionary Digital Asset Class
-
-Intelligence Money represents **verifiable units of intelligent work** - the first digital asset derived from provable AI contributions rather than energy consumption.
-
-**🎯 Core Principles**
-```
-Traditional Crypto:  Energy → Computational Work → Token Value
-Intelligence Money:   AI Work → Verified Contribution → KEY Value
+### 3. IPFS Configuration
+*Purpose: SBT service for uploading metadata and images to IPFS*
+```bash
+PINATA_API_KEY=your_pinata_api_key
+PINATA_SECRET_KEY=your_pinata_secret_key
 ```
 
-### Mining Through Value Creation
-
-**🏗️ The Mining Process**
-1. **Query Initiation**: User submits complex problem to subnet
-2. **AI Collaboration**: Miners and validators work together via PoCW
-3. **Quality Validation**: BFT consensus ensures solution quality  
-4. **Value Attribution**: Successful contributions mine new KEY tokens
-5. **Cryptographic Proof**: VLC graph provides immutable work evidence
-
-**⚡ Real-Time Mining**
-- Every accepted user solution mines new tokens
-- Quality multipliers affect mining rewards
-- Validator consensus participation earns rewards
-- Failed outputs generate no tokens (merit-based system)
-
-### Soulbound Token Economics
-
-**🔒 Non-Transferable Design**
-- **Soulbound**: KEY tokens cannot be transferred between addresses
-- **Reputation-Based**: Tokens represent earned capability and track record
-- **Anti-Speculation**: Prevents market manipulation and speculation bubbles
-- **Cryptographic Resume**: Immutable proof of AI agent competence
-
-**💵 Liquidity Bridge**
-- **Redemption Pool**: One-way bridge to stablecoins (USDC/USDT)
-- **Burn Mechanism**: KEY tokens are destroyed when redeemed
-- **Market Valuation**: Exchange rate determined by supply/demand
-- **Utility Preservation**: Core reputation asset remains non-transferable
-
-### Economic Model
-
-```
-🔄 VALUE FLOW:
-User Problem ──▶ AI Solution ──▶ Quality Validation ──▶ KEY Mining ──▶ Stablecoin Redemption
-     ▲                                      │                              │
-     └─────── Economic Feedback Loop ───────┴──────────────────────────────┘
+### 4. Private Key Configuration
+*Purpose: Each service uses its own private key for authentication and message signing*
+```bash
+MINER_PRIVATE_KEY=0x1111...
+VALIDATOR_1_PRIVATE_KEY=0x2222...
+VALIDATOR_2_PRIVATE_KEY=0x3333...
+VALIDATOR_3_PRIVATE_KEY=0x4444...
+VALIDATOR_4_PRIVATE_KEY=0x5555...
 ```
 
-This creates a **merit-only economy** where value flows directly from problem-solving capability to economic rewards, eliminating speculative intermediaries and ensuring AI agents are compensated based purely on their verifiable contributions to human knowledge and productivity.
+### 5. Validator Endpoints Configuration
+*Purpose: Miner-gateway connects to validator services based on this configuration*
+```bash
+VALIDATOR_ENDPOINTS=[{"id":"validator-1","role":"ui_validator","url":"http://validator-ui:8080","weight":0.40,"priority":1},...]
+```
 
-## 🛠️ Development & Contributing
+### 6. Twitter Verification
+*Purpose: Miner-gateway for Twitter retweet task validation (currently using third-party API)*
+```bash
+TWITTER_RETWEET_CHECK_URL=http://144.91.78.212:8000/api/v1/twitter/retweet-check
+```
 
-### Project Structure
+### 7. Third-party Configuration
+*Purpose: SBT service for fetching user referral relationships*
+```bash
+REFERRAL_API_URL=https://api.hetuverse.com/subnet/api/v1/referral/user/sbt
+```
+
+### 8. Timing Configuration
+*Purpose: Miner-gateway controls task verification frequency and PoCW consensus timing*
+```bash
+VALIDATOR_POLL_INTERVAL_SECONDS=600     # 10 minutes (default 2 hours)
+CONSENSUS_DELAY_SECONDS=300             # 5 minutes
+```
+
+### 9. Service URL Configuration
+*Purpose: HTTP communication addresses between services*
+```bash
+POINTS_SERVICE_URL=http://points-service:8080
+SBT_SERVICE_BASE_URL=http://localhost:8086
+DGRAPH_URL=dgraph-alpha:9080
+REDIS_URL=redis://redis:6379
+```
+
+### 10. Points System Configuration
+*Purpose: Points service configuration using direct VLC-to-points mapping*
+```bash
+POINTS_HISTORY_LIMIT=1000
+```
+
+### 11. Logging Configuration
+*Purpose: Controls log verbosity for all services*
+```bash
+LOG_LEVEL=info  # debug, info, warn, error
+```
+
+## Service Architecture
+
+### Project Structure Comparison
 ```
 Intelligence-KEY-Mining/
-├── main.go                     # Entry point - subnet demonstration
-├── go.mod                      # Go module dependencies
-├── run-subnet-only.sh          # Subnet consensus only mode
-├── run-key-mining.sh           # Full KEY mining mode
-├── run-per-epoch-integration.sh # Alternative KEY mining script
-├── serve-dashboard.go          # Web UI server (integrated into scripts)
-├── mainnet-bridge-per-epoch.js # HTTP bridge service (port 3001)
-├── pocw-inspector.html # Blockchain inspector UI
-├── contracts/                  # Solidity smart contracts
-│   ├── KEYToken.sol           # Soulbound KEY tokens
-│   ├── HETUToken.sol          # Staking token
-│   ├── SubnetRegistry.sol     # Subnet management
-│   └── EnhancedPoCWVerifier.sol # Consensus verification
-├── subnet/                    # Go consensus implementation  
-│   ├── core_miner.go         # AI miner agents
-│   ├── core_validator.go     # BFT validators
-│   ├── graph_adapter.go      # VLC graph & HTTP bridge integration
-│   ├── messages.go           # Protocol message definitions
-│   └── demo/                 # Demo scenarios & coordination
-│       ├── demo_coordinator.go      # Demo orchestration
-│       ├── demo_task_processor.go   # Task processing logic
-│       ├── demo_quality_assessor.go # Quality assessment
-│       └── demo_user_interaction.go # User interface simulation
-├── vlc/                      # Vector Logical Clock library
-│   └── vlc.go               # VLC implementation
-├── dgraph/                   # Graph database integration
-│   ├── connection.go        # Dgraph client connection
-│   └── init.go              # Dgraph initialization
-├── models/                   # Data models
-│   └── event.go             # Event structure definitions
-└── tests/                    # Test utilities
-    ├── test-enhanced-pocw.js  # JavaScript contract tests
-    └── test-enhanced-pocw.sh  # Shell test runner
+├── subnet/                    # Original Demo Code
+│   ├── core_miner.go         # Original Miner Implementation
+│   ├── core_validator.go     # Original Validator Implementation  
+│   ├── demo/                 # Demo Coordinator
+│   └── messages.go           # Original Message Definitions
+├── services/                  # New Architecture Core Services
+│   ├── miner-gateway/        # Miner Service
+│   ├── validator/            # Validator Service (Independent Nodes)
+│   ├── points-service/       # Points Management Service
+│   └── sbt-service/          # SBT Identity Service
 ```
 
-### Adding New Features
-1. **Subnet Logic**: Modify files in `subnet/` directory
-2. **Smart Contracts**: Update contracts in `contracts/` directory  
-3. **Bridge Logic**: Enhance `mainnet-bridge-per-epoch.js`
-4. **UI Components**: Update `pocw-inspector.html`
+### Service Communication
 
-## License
+**Protocol:** HTTP REST API + JSON via Docker Compose network
 
-MIT License - See [LICENSE](LICENSE) for details.
+| From | To | Purpose | Endpoint |
+|------|----|---------|---------| 
+| miner-gateway | validators (4x) | PoCW consensus voting | `POST /api/v1/validate` |
+| miner-gateway | points-service | Points distribution | `POST /api/v1/points/distribute` |
+| sbt-service | points-service | Get user points | `GET /api/v1/points/user/{wallet}` |
+| sbt-service | External API | Referral data | `GET api.hetuverse.com/...` |
 
-## Contributing
+### Task Processing Overview
 
-1. Fork the repository
-2. Create a feature branch
-3. Test with both `./run-subnet-only.sh` and `./run-key-mining.sh`
-4. Submit a pull request
+**TaskCreation**: Direct validation → VLC++ → 50 points → VERIFIED  
+**Twitter Tasks**: API verification → VLC++ → Batch PoCW → Points distribution
 
----
+## PoCW Shared Components
 
-🌟 **Start with `./run-subnet-only.sh` to understand the consensus, then try `./run-key-mining.sh` for the full KEY mining experience!**
+### 1. VLC (Vector Clock) Management
+- `pkg/vlc/vector_clock.go` (Shared VLC implementation)
+- `miner-gateway/services/vlc_service.go`
+- `validator/services/vlc_service.go`
 
-**Intelligence Money represents the next evolution of digital assets - from energy-based mining to intelligence-based value creation. This system shows how AI agents can collaborate, compete, and be fairly compensated in a trustless, merit-based economy.**
+### 2. Protocol Message Definitions
+- `pkg/protocol/messages.go` (MinerOutputRequest, ValidatorVoteResponse)
+
+### 3. Quality Assessment Interface
+- `validator/plugins/quality_assessor.go` (QualityAssessor interface)
+- Original demo: `subnet/demo/demo_quality_assessor.go`
+
+### 4. BFT Consensus Logic
+- `miner-gateway/services/coordinator.go` (RoundCoordinator)
+- Original demo: `subnet/demo/demo_coordinator.go`
+
+## Current System Architecture
+
+### Core Services Overview
+
+| Service | Port | Purpose | Key Components |
+|---------|------|---------|----------------|
+| **miner-gateway** | 8081 | Task processing & PoCW coordination | `BatchVerifier`, `RoundCoordinator`, `ValidatorScheduler` |
+| **validator-ui** | 8082 | VLC validation & UI interaction | `UIValidator`, `VLCService` |
+| **validator-format-1/2** | 8083/8084 | Format validation | `FormatValidator`, `TwitterQualityAssessor` |
+| **validator-semantic** | 8085 | Semantic validation | `SemanticValidator`, deep analysis |
+| **points-service** | 8087 | Points calculation & distribution | Direct VLC-to-points mapping |
+| **sbt-service** | 8086 | Soulbound token management | Dynamic metadata, referral integration |
+
+### Task Processing Flow
+
+#### TaskCreation Tasks
+```
+User submits task → ValidatorScheduler → Simple validation → VLC++ → 50 points → VERIFIED
+```
+
+#### Twitter Tasks  
+```
+User submits task → BatchVerifier → API verification → VLC++ → Batch PoCW → Points distribution
+```
+
+### PoCW Consensus Architecture
+
+**Coordinator**: `RoundCoordinator` (miner-gateway)
+- Manages round lifecycle
+- Collects validator votes via HTTP
+- Implements BFT consensus with weighted voting
+
+**Validators**: 4 specialized validators
+- **UI Validator**: VLC sequence validation + basic format check
+- **Format Validators** (2x): Twitter/Tweet ID format validation  
+- **Semantic Validator**: Deep consistency analysis
+
+**Quality Assessment**: Role-based evaluation
+- Each validator type has specialized `QualityAssessor`
+- Scores combined with validator weights for BFT consensus
+- Threshold: >50% weighted votes for approval
+
+## Quality Assessor System
+
+### Base Interface
+**File:** `validator/plugins/quality_assessor.go`
+
+```go
+type QualityAssessor interface {
+    AssessQuality(minerOutput *models.MinerOutput) (*QualityAssessment, error)
+    GetRole() ValidatorRole
+}
+
+type ValidatorRole string
+const (
+    RoleUI       ValidatorRole = "ui"        // User Interface Validation
+    RoleFormat   ValidatorRole = "format"    // Format Validation  
+    RoleSemantic ValidatorRole = "semantic"  // Semantic Validation
+)
+```
+
+### Validator Role Specialization
+
+| Validator | Role | Weight | Primary Assessment |
+|-----------|------|--------|-------------------|
+| validator-ui | UI Validator | 0.40 | VLC validation + basic format |
+| validator-format-1/2 | Format Validator | 0.20 each | Data format compliance |
+| validator-semantic | Semantic Validator | 0.20 | Deep consistency analysis |
+
+### Quality Assessment Process
+1. Each validator assesses `MinerOutput` based on their specialized role
+2. Returns `QualityResult{Accept, Score, Reason}` with score 0.0-1.0
+3. Scores combined with validator weights for BFT consensus
+4. Consensus threshold: >50% weighted approval for task acceptance
+
+## BFT Consensus Mechanism
+
+### Weighted Voting Process
+1. **Vote Collection**: `RoundCoordinator` sends `MinerOutput` to 4 validators via HTTP
+2. **Quality Assessment**: Each validator returns vote + quality score + weight  
+3. **Consensus Calculation**: Weighted BFT algorithm
+   - Total validator weight: 4.0 (0.40 + 0.20 + 0.20 + 0.20)
+   - Consensus achieved when >50% weight participates (>2.0)
+   - Task approved when >50% of participating weight votes "approve"
+4. **Result**: Batch tasks approved/rejected based on weighted consensus
+
+## Dgraph Usage
+
+### Core Services DGraph Storage
+**Location:** `services/miner-gateway/services/`
+
+**Stored Content:**
+1. **Batch Verification Rounds:**
+   - round_id, start_time, end_time
+   - Participating Twitter task list
+   - Verification result summary
+
+2. **PoCW Consensus Records:**
+   - Each round's participants
+   - Voting results and BFT status
+   - Final consensus results
+
+3. **VLC History:**
+   - Each user's VLC change trajectory
+   - Task completion corresponding VLC increments
+   - Cross-service VLC synchronization status
+
+**Current Implementation:**
+- `services/miner-gateway/services/coordinator.go` (consensus round recording)
+- `services/batch_verifier.go` (batch verification recording)
+- `pkg/graph/graph_client.go` (DGraph client wrapper)
+
+## System Flow Diagram
+
+### Twitter Task Processing Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant MG as Miner-Gateway
+    participant BV as BatchVerifier
+    participant API as Twitter API
+    participant V1 as Validator-UI
+    participant V2 as Validator-Format
+    participant V3 as Validator-Semantic
+    participant RC as RoundCoordinator
+    participant PS as Points-Service
+
+    U->>MG: Submit Twitter task
+    MG->>BV: Queue task for verification
+    
+    Note over BV,API: Single Task Verification Phase
+    BV->>API: Verify retweet via external API
+    API-->>BV: Verification result
+    BV->>BV: VLC++ (user VLC increment)
+    BV->>BV: Task status: PENDING_VERIFICATION
+    
+    Note over BV,RC: Batch Collection Phase  
+    BV->>BV: Collect verified tasks into batch
+    BV->>RC: Send completed batch round
+    
+    Note over RC,V3: PoCW Consensus Phase
+    RC->>V1: Request validation (VLC + format check)
+    V1-->>RC: Vote + Quality score + Weight
+    
+    RC->>V2: Request validation (format validation)
+    V2-->>RC: Vote + Quality score + Weight
+    
+    RC->>V3: Request validation (semantic analysis)
+    V3-->>RC: Vote + Quality score + Weight
+    
+    RC->>RC: BFT consensus calculation
+    Note over RC: Weighted voting: >50% weight for approval
+    
+    Note over RC,PS: Points Distribution Phase
+    RC->>PS: Distribute points for approved batch
+    PS-->>RC: Distribution result
+    RC->>RC: Update task status: VERIFIED
+```
+
+## Key Processes and Technologies
+
+The system implements a sophisticated PoCW consensus mechanism that combines:
+- **Vector Clocks (VLC)** for causal ordering and user progress tracking
+- **Multi-validator quality assessment** with specialized roles (UI, Format, Semantic)
+- **BFT consensus** with weighted voting for Byzantine fault tolerance
+- **Microservices architecture** with HTTP REST API communication
+- **Batch processing** for efficient consensus on multiple verified tasks
+- **Real-time API verification** for immediate user feedback
+- **Direct VLC-to-points mapping** for transparent reward distribution
+
+This architecture ensures reliable validation of social tasks while maintaining decentralization and fault tolerance through the coordinated effort of multiple specialized validators.

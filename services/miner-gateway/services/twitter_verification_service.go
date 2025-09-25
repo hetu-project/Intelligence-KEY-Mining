@@ -76,36 +76,32 @@ func NewTwitterVerificationService(retweetCheckURL string, db *sql.DB) *TwitterV
 
 // VerifyTwitterRetweetTask verifies a single Twitter retweet task with full fault tolerance
 func (tvs *TwitterVerificationService) VerifyTwitterRetweetTask(ctx context.Context, task *models.Task) (*TwitterVerificationResult, error) {
-	// 创建基础结果结构，默认为未验证状态
 	result := &TwitterVerificationResult{
 		TaskID:     task.ID,
 		UserWallet: task.UserWallet,
-		Verified:   false, // 默认未验证
+		Verified:   false,
 		Error:      nil,
 	}
 
-	// 1. 提取任务信息
 	tweetID, twitterUsername, err := tvs.extractTaskInfo(task)
 	if err != nil {
-		result.TweetID = tweetID // 可能部分提取成功
+		result.TweetID = tweetID
 		result.Error = fmt.Errorf("task info extraction failed: %v", err)
-		return result, nil // 不返回error，让系统继续运行
+		return result, nil
 	}
 	result.TweetID = tweetID
 
-	// 2. 查询用户Twitter ID
 	userTwitterID, err := tvs.getUserTwitterID(ctx, task.UserWallet)
 	if err != nil {
 		result.Error = fmt.Errorf("user twitter ID not found: %v", err)
-		return result, nil // 用户没绑定Twitter，标记为未完成
+		return result, nil
 	}
 
-	// 3. API调用（带重试和容错）
 	verified, apiResponse, err := tvs.callRetweetCheckAPIWithRetry(ctx, tweetID, twitterUsername, userTwitterID, task)
 	if err != nil {
 		result.Error = fmt.Errorf("API call failed: %v", err)
-		result.APIResponse = apiResponse // 保留API响应用于调试
-		return result, nil               // API问题不影响系统
+		result.APIResponse = apiResponse
+		return result, nil
 	}
 
 	result.Verified = verified
@@ -113,7 +109,7 @@ func (tvs *TwitterVerificationService) VerifyTwitterRetweetTask(ctx context.Cont
 	return result, nil
 }
 
-// extractTaskInfo 提取任务信息，容错处理
+// extractTaskInfo
 func (tvs *TwitterVerificationService) extractTaskInfo(task *models.Task) (tweetID, twitterUsername string, err error) {
 	tweetID, ok := task.Payload["tweet_id"].(string)
 	if !ok || tweetID == "" {
@@ -238,7 +234,7 @@ func (tvs *TwitterVerificationService) processBatch(ctx context.Context, tasks [
 	return results, nil
 }
 
-// callRetweetCheckAPIWithRetry 带重试和超时的API调用
+// callRetweetCheckAPIWithRetry
 func (tvs *TwitterVerificationService) callRetweetCheckAPIWithRetry(ctx context.Context, tweetID, twitterUsername, userTwitterID string, task *models.Task) (bool, *TwitterRetweetCheckResponse, error) {
 	const maxRetries = 3
 	const timeoutPerCall = 10 * time.Second
@@ -247,17 +243,15 @@ func (tvs *TwitterVerificationService) callRetweetCheckAPIWithRetry(ctx context.
 		verified, resp, err := tvs.callRetweetCheckAPISingle(ctx, tweetID, twitterUsername, userTwitterID, task, timeoutPerCall)
 
 		if err == nil {
-			return verified, resp, nil // 成功
+			return verified, resp, nil
 		}
 
 		log.Printf("Twitter API call attempt %d/%d failed for task %s: %v", attempt, maxRetries, task.ID, err)
 
-		// 最后一次尝试失败
 		if attempt == maxRetries {
 			return false, resp, fmt.Errorf("all %d attempts failed, last error: %v", maxRetries, err)
 		}
 
-		// 重试延迟
 		select {
 		case <-ctx.Done():
 			return false, resp, ctx.Err()
@@ -269,9 +263,8 @@ func (tvs *TwitterVerificationService) callRetweetCheckAPIWithRetry(ctx context.
 	return false, nil, fmt.Errorf("unexpected retry loop exit")
 }
 
-// callRetweetCheckAPISingle 单次API调用，带完整错误处理
+// callRetweetCheckAPISingle
 func (tvs *TwitterVerificationService) callRetweetCheckAPISingle(ctx context.Context, tweetID, twitterUsername, userTwitterID string, task *models.Task, timeout time.Duration) (bool, *TwitterRetweetCheckResponse, error) {
-	// 创建带超时的context
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -299,12 +292,10 @@ func (tvs *TwitterVerificationService) callRetweetCheckAPISingle(ctx context.Con
 
 	resp, err := tvs.client.Do(httpReq)
 	if err != nil {
-		// 网络错误、超时等
 		return false, nil, fmt.Errorf("HTTP request failed: %v", err)
 	}
 	defer resp.Body.Close()
 
-	// 检查状态码
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return false, nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(bodyBytes))
@@ -312,18 +303,17 @@ func (tvs *TwitterVerificationService) callRetweetCheckAPISingle(ctx context.Con
 
 	var apiResp TwitterRetweetCheckResponse
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		// JSON格式错误
+
 		return false, &apiResp, fmt.Errorf("response decode failed: %v", err)
 	}
 
 	return apiResp.HasRetweet, &apiResp, nil
 }
 
-// callRetweetCheckAPI 保留原有方法名，但现在调用新的重试方法
+// callRetweetCheckAPI
 func (tvs *TwitterVerificationService) callRetweetCheckAPI(ctx context.Context, req TwitterRetweetCheckRequest) (bool, *TwitterRetweetCheckResponse, error) {
-	// 为了兼容性，创建一个假的task对象
 	task := &models.Task{
-		CreatedAt: time.Now().Add(-1 * time.Hour), // 假设1小时前创建
+		CreatedAt: time.Now().Add(-1 * time.Hour),
 	}
 
 	return tvs.callRetweetCheckAPIWithRetry(ctx, req.PostID, req.MediaAccount, req.XID, task)

@@ -27,7 +27,7 @@ const (
 	TaskPendingVerification TaskStatus = "PENDING_VERIFICATION"
 	TaskVerified            TaskStatus = "VERIFIED"
 	TaskFailed              TaskStatus = "FAILED"
-	TaskPendingReview       TaskStatus = "PENDING_REVIEW" // 需要人工审核
+	TaskPendingReview       TaskStatus = "PENDING_REVIEW"
 	TaskMinerOutputCreated  TaskStatus = "MINER_OUTPUT_CREATED"
 	TaskVoted               TaskStatus = "VOTED"
 	TaskConfirmed           TaskStatus = "CONFIRMED"

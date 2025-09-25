@@ -145,7 +145,7 @@ func (vs *ValidatorScheduler) processTaskCreationTasks(ctx context.Context, task
 			// TaskCreation is just the action of creating a task
 			// Simple validation: check if payload contains required fields
 			if vs.validateTaskCreationPayload(task.Payload) {
-				// TaskCreation验证通过：直接VLC++，任务完成
+				// TaskCreation verification passed: direct VLC++, task completed
 				log.Printf("TaskCreation %s validated successfully - completing task", task.ID)
 
 				// Create simple proof
