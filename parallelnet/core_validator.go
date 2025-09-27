@@ -1,7 +1,7 @@
 // Package subnet implements the core Proof-of-Causal-Work (PoCW) subnet architecture.
 // This package provides generic, reusable components for building validator-miner networks
 // with Vector Logical Clock (VLC) based consensus and pluggable quality assessment.
-package subnet
+package parallelnet
 
 import (
 	"fmt"

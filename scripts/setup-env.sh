@@ -155,8 +155,8 @@ show_env_status() {
         
         # Check for available template
         echo "   Available template:"
-        if [ -f "env.example" ]; then
-            echo "     📄 env.example"
+        if [ -f ".env.example" ]; then
+            echo "     📄 .env.example"
         else
             echo "     ❌ No template found"
         fi
@@ -184,9 +184,9 @@ interactive_setup() {
     fi
     
     # Use the only available template
-    local template="env.example"
-    if [ ! -f "env.example" ]; then
-        log_error "env.example template not found"
+    local template=".env.example"
+    if [ ! -f ".env.example" ]; then
+        log_error ".env.example template not found"
         return 1
     fi
     
@@ -216,7 +216,7 @@ main() {
             if [ -n "$2" ]; then
                 create_env_from_template "$2"
             else
-                create_env_from_template "env.example"
+                create_env_from_template ".env.example"
             fi
             ;;
         "backup")
@@ -238,7 +238,7 @@ main() {
             echo "Usage: $0 <command> [options]"
             echo
             echo "Commands:"
-            echo "  create [template]    Create .env from template (default: env.example)"
+            echo "  create [template]    Create .env from template (default: .env.example)"
             echo "  backup              Backup existing .env file"
             echo "  validate            Validate .env configuration"
             echo "  status              Show .env status"
@@ -246,8 +246,8 @@ main() {
             echo "  help                Show this help message"
             echo
             echo "Examples:"
-            echo "  $0 create                    # Create from env.example"
-            echo "  $0 create env.example        # Create from env.example"
+            echo "  $0 create                    # Create from .env.example"
+            echo "  $0 create .env.example        # Create from .env.example"
             echo "  $0 interactive               # Run setup wizard"
             echo "  $0 validate                  # Check configuration"
             echo

@@ -3,7 +3,7 @@
 // This file implements the CoreMiner, a generic AI agent that processes user tasks
 // while maintaining Vector Logical Clock (VLC) consistency for Proof-of-Causal-Work.
 // The miner uses pluggable task processors to enable different AI models and processing strategies.
-package subnet
+package parallelnet
 
 import (
 	"sync"

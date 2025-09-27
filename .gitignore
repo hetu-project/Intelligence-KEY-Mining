@@ -60,8 +60,8 @@ dashboard.log
 .env.production.local
 .env.backup.*
 .env.*
-!env.template
-!env.example
+!.env.template
+!.env.example
 
 # Coverage reports
 *.cover

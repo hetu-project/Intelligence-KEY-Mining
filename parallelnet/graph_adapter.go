@@ -3,7 +3,7 @@
 // This file integrates the PoCW subnet architecture with the Dgraph-based
 // causal event graph system. It creates visual representations of the
 // round-based VLC interactions between Miner and Validator-1.
-package subnet
+package parallelnet
 
 import (
 	"bytes"

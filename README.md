@@ -147,7 +147,7 @@ LOG_LEVEL=info  # debug, info, warn, error
 ### Project Structure Comparison
 ```
 Intelligence-KEY-Mining/
-├── subnet/                    # Original Demo Code
+├── parallelnet/                    # Original Demo Code
 │   ├── core_miner.go         # Original Miner Implementation
 │   ├── core_validator.go     # Original Validator Implementation  
 │   ├── demo/                 # Demo Coordinator
@@ -187,11 +187,11 @@ Intelligence-KEY-Mining/
 
 ### 3. Quality Assessment Interface
 - `validator/plugins/quality_assessor.go` (QualityAssessor interface)
-- Original demo: `subnet/demo/demo_quality_assessor.go`
+- Original demo: `parallelnet/demo/demo_quality_assessor.go`
 
 ### 4. BFT Consensus Logic
 - `miner-gateway/services/coordinator.go` (RoundCoordinator)
-- Original demo: `subnet/demo/demo_coordinator.go`
+- Original demo: `parallelnet/demo/demo_coordinator.go`
 
 ## Current System Architecture
 

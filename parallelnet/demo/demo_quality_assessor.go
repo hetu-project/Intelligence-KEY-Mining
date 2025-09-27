@@ -11,7 +11,7 @@
 //   - Machine learning-based quality prediction
 package demo
 
-import "github.com/hetu-project/Intelligence-KEY-Mining/subnet"
+import "github.com/hetu-project/Intelligence-KEY-Mining/parallelnet"
 
 // DemoQualityAssessor implements predetermined quality assessment for demonstration.
 // Uses hardcoded rules based on input numbers to create consistent test scenarios:
@@ -40,7 +40,7 @@ func NewDemoQualityAssessor() *DemoQualityAssessor {
 //   - 0.60: Default quality for unknown inputs
 //
 // Acceptance decisions simulate real validator behavior patterns.
-func (d *DemoQualityAssessor) AssessQuality(response *subnet.MinerResponseMessage) (float64, bool) {
+func (d *DemoQualityAssessor) AssessQuality(response *parallelnet.MinerResponseMessage) (float64, bool) {
 	// Map input numbers to predetermined quality assessments for demo consistency
 	inputNum := response.InputNumber
 

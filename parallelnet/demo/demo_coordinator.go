@@ -1,4 +1,4 @@
-// Package demo implements Proof-of-Concept (PoC) demonstration logic for the PoCW subnet.
+// Package demo implements Proof-of-Concept (PoC) demonstration logic for the PoCW parallelnet.
 //
 // This package provides hardcoded scenarios that showcase the subnet's capabilities:
 //   - 7 predefined user inputs with expected behaviors
@@ -14,11 +14,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hetu-project/Intelligence-KEY-Mining/subnet"
+	"github.com/hetu-project/Intelligence-KEY-Mining/parallelnet"
 	"github.com/hetu-project/Intelligence-KEY-Mining/vlc"
 )
 
-// DemoCoordinator orchestrates the complete PoC demonstration of the PoCW subnet.
+// DemoCoordinator orchestrates the complete PoC demonstration of the PoCW parallelnet.
 // It combines core subnet components (CoreMiner, CoreValidator) with demo-specific
 // plugins to create a realistic but controlled testing environment.
 //
@@ -29,27 +29,27 @@ import (
 //   - Demonstrates both normal processing and info request scenarios
 type DemoCoordinator struct {
 	SubnetID     string                    // Unique identifier for this demo subnet
-	Miner        *subnet.CoreMiner         // AI agent processing tasks
-	Validators   []*subnet.CoreValidator   // Quality assessment and consensus nodes
+	Miner        *parallelnet.CoreMiner         // AI agent processing tasks
+	Validators   []*parallelnet.CoreValidator   // Quality assessment and consensus nodes
 	userInputs   []string                  // Predefined demo inputs for consistent testing
-	GraphAdapter *subnet.SubnetGraphAdapter // Graph adapter for VLC event visualization
+	GraphAdapter *parallelnet.SubnetGraphAdapter // Graph adapter for VLC event visualization
 }
 
 // NewDemoCoordinator creates a new demo coordinator with all PoC-specific logic
 func NewDemoCoordinator(subnetID string) *DemoCoordinator {
 	// Create core miner with demo task processor
-	miner := subnet.NewCoreMiner("miner-1", subnetID)
+	miner := parallelnet.NewCoreMiner("miner-1", subnetID)
 	miner.SetTaskProcessor(NewDemoTaskProcessor())
 
 	// Create core validators with demo plugins
-	validators := make([]*subnet.CoreValidator, 4)
+	validators := make([]*parallelnet.CoreValidator, 4)
 	for i := 0; i < 4; i++ {
-		role := subnet.ConsensusValidator
+		role := parallelnet.ConsensusValidator
 		if i == 0 {
-			role = subnet.UserInterfaceValidator // First validator handles user interaction
+			role = parallelnet.UserInterfaceValidator // First validator handles user interaction
 		}
 
-		validator := subnet.NewCoreValidator(
+		validator := parallelnet.NewCoreValidator(
 			fmt.Sprintf("validator-%d", i+1),
 			subnetID,
 			role,
@@ -64,7 +64,7 @@ func NewDemoCoordinator(subnetID string) *DemoCoordinator {
 	}
 
 	// Create graph adapter for visualization
-	graphAdapter := subnet.NewSubnetGraphAdapter(subnetID, 1, "subnet-coordinator")
+	graphAdapter := parallelnet.NewSubnetGraphAdapter(subnetID, 1, "subnet-coordinator")
 
 	return &DemoCoordinator{
 		SubnetID:     subnetID,
@@ -149,7 +149,7 @@ func (dc *DemoCoordinator) processInput(inputNumber int, input string) {
 	// Track miner's response (output or info request)
 	minerResponseEventID := dc.GraphAdapter.TrackMinerResponse(requestID, minerResponse, userInputEventID)
 
-	if minerResponse.OutputType == subnet.NeedMoreInfo {
+	if minerResponse.OutputType == parallelnet.NeedMoreInfo {
 		// Handle info request scenario
 		dc.handleInfoRequest(inputNumber, input, minerResponse, minerResponseEventID)
 	} else {
@@ -159,7 +159,7 @@ func (dc *DemoCoordinator) processInput(inputNumber int, input string) {
 }
 
 // handleInfoRequest processes the scenario where miner needs more information with VLC orchestration
-func (dc *DemoCoordinator) handleInfoRequest(inputNumber int, originalInput string, minerResponse *subnet.MinerResponseMessage, parentEventID string) {
+func (dc *DemoCoordinator) handleInfoRequest(inputNumber int, originalInput string, minerResponse *parallelnet.MinerResponseMessage, parentEventID string) {
 	fmt.Printf("Miner requests more info: %s\n", minerResponse.InfoRequest)
 
 	// Step 1: Validate miner's VLC sequence (NeedMoreInfo message)
@@ -207,7 +207,7 @@ func (dc *DemoCoordinator) handleInfoRequest(inputNumber int, originalInput stri
 }
 
 // validateVLCSequenceFromMiner validates miner's VLC sequence across all validators
-func (dc *DemoCoordinator) validateVLCSequenceFromMiner(minerResponse *subnet.MinerResponseMessage) {
+func (dc *DemoCoordinator) validateVLCSequenceFromMiner(minerResponse *parallelnet.MinerResponseMessage) {
 	fmt.Printf("Validators validating Miner VLC sequence (local verification)...\n")
 	
 	// Each validator independently validates miner's VLC sequence
@@ -249,7 +249,7 @@ func (dc *DemoCoordinator) validateVLCSequenceFromValidator(validatorClock *vlc.
 }
 
 // handleNormalOutput processes normal miner output through VLC validation and quality consensus
-func (dc *DemoCoordinator) handleNormalOutput(inputNumber int, minerResponse *subnet.MinerResponseMessage, parentEventID string) {
+func (dc *DemoCoordinator) handleNormalOutput(inputNumber int, minerResponse *parallelnet.MinerResponseMessage, parentEventID string) {
 	fmt.Printf("Miner output: %s\n", minerResponse.Output)
 
 	// Step 1: Validate miner's VLC sequence for OutputReady message
@@ -260,13 +260,13 @@ func (dc *DemoCoordinator) handleNormalOutput(inputNumber int, minerResponse *su
 	uiValidator.UpdateMinerClock(minerResponse.VLCClock)
 
 	// Step 3: Create shared quality assessment for consensus voting
-	sharedAssessment := &subnet.QualityAssessment{
+	sharedAssessment := &parallelnet.QualityAssessment{
 		RequestID: minerResponse.RequestID,
 	}
 
 	// Step 4: All validators vote on output quality (distributed consensus)
 	fmt.Printf("Validators performing quality assessment voting (distributed consensus)...\n")
-	votes := make([]*subnet.ValidatorVoteMessage, 0, len(dc.Validators))
+	votes := make([]*parallelnet.ValidatorVoteMessage, 0, len(dc.Validators))
 
 	// Each validator performs quality assessment and voting
 	for _, validator := range dc.Validators {
