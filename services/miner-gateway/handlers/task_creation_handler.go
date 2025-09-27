@@ -3,7 +3,9 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/hetu-project/Intelligence-KEY-Mining/services/miner-gateway/models"
@@ -12,13 +14,15 @@ import (
 
 // TaskCreationHandler handles task creation related requests
 type TaskCreationHandler struct {
-	taskService *services.TaskService
+	taskService   *services.TaskService
+	subnetService *services.SubnetService
 }
 
 // NewTaskCreationHandler creates a new task creation handler
-func NewTaskCreationHandler(taskService *services.TaskService) *TaskCreationHandler {
+func NewTaskCreationHandler(taskService *services.TaskService, subnetService *services.SubnetService) *TaskCreationHandler {
 	return &TaskCreationHandler{
-		taskService: taskService,
+		taskService:   taskService,
+		subnetService: subnetService,
 	}
 }
 
@@ -32,6 +36,21 @@ func parseIntParam(param string, min, max int) (int, error) {
 		return 0, fmt.Errorf("value %d out of range [%d, %d]", value, min, max)
 	}
 	return value, nil
+}
+
+// getTaskExpiryDays gets task expiry days from environment variable
+func getTaskExpiryDays() int {
+	expiryDaysStr := os.Getenv("TASK_EXPIRY_DAYS")
+	if expiryDaysStr == "" {
+		return 7 // Default 7 days
+	}
+
+	expiryDays, err := strconv.Atoi(expiryDaysStr)
+	if err != nil || expiryDays <= 0 {
+		return 7 // Default 7 days if invalid
+	}
+
+	return expiryDays
 }
 
 // CreateTwitterTask handles Twitter task creation
@@ -62,10 +81,36 @@ func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 		return
 	}
 
+	// Handle subnet creation/lookup
+	var subnetID string
+	if req.ProjectName != "" {
+		subnetReq := &models.SubnetCreateRequest{
+			Name:          req.ProjectName,
+			Icon:          req.ProjectIcon,
+			CreatorWallet: req.UserWallet,
+		}
+
+		subnet, err := tch.subnetService.FindOrCreateSubnet(c.Request.Context(), subnetReq)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": "Failed to handle subnet: " + err.Error(),
+			})
+			return
+		}
+		subnetID = subnet.ID
+	}
+
+	// Calculate task expiry time
+	expiryDays := getTaskExpiryDays()
+	expiresAt := time.Now().AddDate(0, 0, expiryDays)
+
 	// Build task submission request
 	taskReq := &models.TaskSubmitRequest{
 		UserWallet: req.UserWallet,
 		TaskType:   string(internalTaskType), // Use internal task type
+		SubnetID:   subnetID,
+		ExpiresAt:  &expiresAt,
 		Payload: map[string]interface{}{
 			"project_name":     req.ProjectName,
 			"project_icon":     req.ProjectIcon,
@@ -73,6 +118,7 @@ func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 			"twitter_username": req.TwitterUsername,
 			"twitter_link":     req.TwitterLink,
 			"tweet_id":         req.TweetID,
+			"subnet_id":        subnetID,
 		},
 	}
 

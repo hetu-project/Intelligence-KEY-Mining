@@ -76,6 +76,8 @@ func (ts *TaskService) SubmitTask(ctx context.Context, req *models.TaskSubmitReq
 		Attempts:   0,
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
+		SubnetID:   req.SubnetID,
+		ExpiresAt:  req.ExpiresAt,
 	}
 
 	// 3. Check if VLC increment is needed on submission (dual-layer VLC)
@@ -272,13 +274,14 @@ func (ts *TaskService) saveTask(ctx context.Context, task *models.Task) error {
 	payloadJSON, _ := json.Marshal(task.Payload)
 
 	query := `
-		INSERT INTO tasks (id, user_wallet, task_type, status, payload, attempts, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO tasks (id, user_wallet, task_type, status, payload, attempts, created_at, updated_at, subnet_id, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	_, err := ts.db.ExecContext(ctx, query,
 		task.ID, task.UserWallet, task.TaskType, task.Status,
 		payloadJSON, task.Attempts, task.CreatedAt, task.UpdatedAt,
+		task.SubnetID, task.ExpiresAt,
 	)
 
 	return err

@@ -3,6 +3,7 @@ package services
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -585,7 +586,7 @@ func (rc *RoundCoordinator) distributeBatchRoundPoints(batchTask *models.Task) {
 
 	log.Printf("✅ Found %d verified tasks with real user addresses for round %s", len(verifiedTasksData), roundID)
 
-	// Create a batch points distribution request with REAL user tasks
+	// 1. Distribute points to retweet task completers
 	pointsReq := &points.PointsDistributionRequest{
 		BatchID:     fmt.Sprintf("pocw-batch-%s", roundID),
 		TriggerType: "pocw_batch_consensus_approved",
@@ -599,17 +600,21 @@ func (rc *RoundCoordinator) distributeBatchRoundPoints(batchTask *models.Task) {
 	result, err := rc.pointsClient.DistributePoints(ctx, pointsReq)
 	if err != nil {
 		log.Printf("❌ Failed to distribute batch points for round %s: %v", roundID, err)
-	} else {
-		log.Printf("✅ Batch points distributed successfully for round %s to %d real users", roundID, len(verifiedTasksData))
-		if result != nil {
-			log.Printf("   Points distribution result: %d users processed successfully", len(result.UserAllocations))
-			for _, userResult := range result.UserAllocations {
-				if userResult.UpdateStatus == "success" {
-					log.Printf("   💰 User %s received %d points", userResult.UserWallet[:10]+"...", userResult.RoundedPoints)
-				}
+		return
+	}
+
+	log.Printf("✅ Batch points distributed successfully for round %s to %d real users", roundID, len(verifiedTasksData))
+	if result != nil {
+		log.Printf("   Points distribution result: %d users processed successfully", len(result.UserAllocations))
+		for _, userResult := range result.UserAllocations {
+			if userResult.UpdateStatus == "success" {
+				log.Printf("   💰 User %s received %d points", userResult.UserWallet[:10]+"...", userResult.RoundedPoints)
 			}
 		}
 	}
+
+	// 2. Calculate and distribute 5% commission to subnet creators
+	rc.distributeCreatorCommissions(ctx, verifiedTasksData, roundID)
 }
 
 // getVerifiedTasksFromBatch retrieves the actual verified tasks from the batch verifier
@@ -1015,4 +1020,116 @@ func (rc *RoundCoordinator) GetCoordinatorStatus() map[string]interface{} {
 	}
 
 	return status
+}
+
+// distributeCreatorCommissions distributes 5% commission to subnet creators
+func (rc *RoundCoordinator) distributeCreatorCommissions(ctx context.Context, verifiedTasks []points.TaskVLC, roundID string) {
+	if rc.pointsClient == nil {
+		log.Printf("No points client available for creator commissions")
+		return
+	}
+
+	log.Printf("🎯 Calculating 5%% creator commissions for %d verified tasks in round %s", len(verifiedTasks), roundID)
+
+	// Group tasks by creator and calculate commissions
+	creatorCommissions := make(map[string]int) // creator_wallet -> total_commission_points
+	taskCreatorMap := make(map[string]string)  // task_id -> creator_wallet
+
+	for _, taskVLC := range verifiedTasks {
+		// Get task details to find subnet and creator
+		taskCreator, err := rc.getTaskCreator(ctx, taskVLC.TaskID)
+		if err != nil {
+			log.Printf("Failed to get creator for task %s: %v", taskVLC.TaskID, err)
+			continue
+		}
+
+		if taskCreator == "" {
+			log.Printf("No creator found for task %s", taskVLC.TaskID)
+			continue
+		}
+
+		// Calculate 5% commission
+		commission := int(float64(taskVLC.VLCValue) * 0.05)
+		if commission > 0 {
+			creatorCommissions[taskCreator] += commission
+			taskCreatorMap[taskVLC.TaskID] = taskCreator
+			log.Printf("   Task %s: %d points → %d commission to creator %s",
+				taskVLC.TaskID, taskVLC.VLCValue, commission, taskCreator[:10]+"...")
+		}
+	}
+
+	if len(creatorCommissions) == 0 {
+		log.Printf("No creator commissions to distribute for round %s", roundID)
+		return
+	}
+
+	// Distribute commissions to creators
+	totalCommissionPoints := 0
+	for creatorWallet, commissionPoints := range creatorCommissions {
+		if commissionPoints <= 0 {
+			continue
+		}
+
+		// Create commission distribution request
+		commissionReq := &points.PointsDistributionRequest{
+			BatchID:     fmt.Sprintf("creator-commission-%s-%s", roundID, creatorWallet[:8]),
+			TriggerType: "subnet_creator_commission",
+			Timestamp:   time.Now(),
+			Tasks: []points.TaskVLC{
+				{
+					UserWallet: creatorWallet,
+					TaskType:   "creator_commission",
+					VLCValue:   commissionPoints,
+					TaskID:     fmt.Sprintf("commission-%s", roundID),
+				},
+			},
+		}
+
+		// Distribute commission with timeout
+		commissionCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		result, err := rc.pointsClient.DistributePoints(commissionCtx, commissionReq)
+		cancel()
+
+		if err != nil {
+			log.Printf("❌ Failed to distribute creator commission to %s: %v", creatorWallet[:10]+"...", err)
+		} else {
+			log.Printf("✅ Creator commission distributed: %d points to %s", commissionPoints, creatorWallet[:10]+"...")
+			totalCommissionPoints += commissionPoints
+
+			if result != nil && len(result.UserAllocations) > 0 {
+				userResult := result.UserAllocations[0]
+				if userResult.UpdateStatus == "success" {
+					log.Printf("   💰 Creator %s received %d commission points", userResult.UserWallet[:10]+"...", userResult.RoundedPoints)
+				}
+			}
+		}
+	}
+
+	log.Printf("🎉 Total creator commissions distributed: %d points to %d creators", totalCommissionPoints, len(creatorCommissions))
+}
+
+// getTaskCreator gets the creator wallet address for a task by looking up subnet info
+func (rc *RoundCoordinator) getTaskCreator(ctx context.Context, taskID string) (string, error) {
+	// Query task to get subnet_id
+	query := `
+		SELECT t.subnet_id, s.creator_wallet 
+		FROM tasks t 
+		LEFT JOIN subnets s ON t.subnet_id = s.id 
+		WHERE t.id = ?
+	`
+
+	var subnetID, creatorWallet sql.NullString
+	err := rc.taskService.db.QueryRowContext(ctx, query, taskID).Scan(&subnetID, &creatorWallet)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil // Task not found or no subnet
+		}
+		return "", fmt.Errorf("failed to query task creator: %v", err)
+	}
+
+	if !creatorWallet.Valid {
+		return "", nil // No creator found
+	}
+
+	return creatorWallet.String, nil
 }

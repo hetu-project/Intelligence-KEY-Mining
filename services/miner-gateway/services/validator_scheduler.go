@@ -90,9 +90,29 @@ func (vs *ValidatorScheduler) Stop() {
 	log.Println("ValidatorScheduler stopped")
 }
 
-// schedulerLoop main scheduler loop
+// schedulerLoop main scheduler loop - NEW: Daily midnight execution
 func (vs *ValidatorScheduler) schedulerLoop() {
-	ticker := time.NewTicker(vs.pollInterval)
+	log.Printf("ValidatorScheduler starting with daily midnight execution")
+
+	// Calculate time until next midnight
+	now := time.Now()
+	nextMidnight := vs.getNextMidnight(now)
+	initialDelay := time.Until(nextMidnight)
+
+	log.Printf("First validation will run at %v (in %v)", nextMidnight.Format("2006-01-02 15:04:05"), initialDelay)
+
+	// Wait until first midnight
+	select {
+	case <-vs.ctx.Done():
+		return
+	case <-time.After(initialDelay):
+		// Run first validation at midnight
+		log.Printf("🌙 Running midnight validation at %v", time.Now().Format("2006-01-02 15:04:05"))
+		vs.processPendingTasks()
+	}
+
+	// Then run every 24 hours
+	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
 
 	for {
@@ -100,22 +120,47 @@ func (vs *ValidatorScheduler) schedulerLoop() {
 		case <-vs.ctx.Done():
 			return
 		case <-ticker.C:
+			log.Printf("🌙 Running daily midnight validation at %v", time.Now().Format("2006-01-02 15:04:05"))
 			vs.processPendingTasks()
 		}
 	}
 }
 
-// processPendingTasks processes pending verification tasks
+// getNextMidnight calculates the next midnight time
+func (vs *ValidatorScheduler) getNextMidnight(now time.Time) time.Time {
+	// Get tomorrow's date at 00:00:00
+	tomorrow := now.AddDate(0, 0, 1)
+	return time.Date(tomorrow.Year(), tomorrow.Month(), tomorrow.Day(), 0, 0, 0, 0, tomorrow.Location())
+}
+
+// processPendingTasks processes pending verification tasks with daily distribution check
 func (vs *ValidatorScheduler) processPendingTasks() {
 	ctx := vs.ctx
+	today := time.Now()
+
+	log.Printf("🔍 Starting daily task processing for %s", today.Format("2006-01-02"))
+
+	// Check if today's distribution has already been completed
+	// This would be implemented when we integrate with points service
+	// For now, we proceed with task processing
 
 	// 1. Process task creation tasks (individual verification)
 	taskCreationTasks, err := vs.getTasksByTypeAndStatus(ctx, string(models.TaskCreationTask), "PENDING_VERIFICATION")
 	if err != nil {
 		log.Printf("Error fetching task creation tasks: %v", err)
 	} else if len(taskCreationTasks) > 0 {
-		log.Printf("Processing %d task creation tasks individually", len(taskCreationTasks))
-		vs.processTaskCreationTasks(ctx, taskCreationTasks)
+		// Check and filter expired tasks
+		validTasks, err := vs.checkAndFilterExpiredTasks(ctx, taskCreationTasks)
+		if err != nil {
+			log.Printf("Error checking expired task creation tasks: %v", err)
+		} else if len(validTasks) > 0 {
+			log.Printf("Processing %d task creation tasks individually (filtered %d expired)", len(validTasks), len(taskCreationTasks)-len(validTasks))
+			vs.processTaskCreationTasks(ctx, validTasks)
+		} else {
+			log.Printf("All %d task creation tasks have expired", len(taskCreationTasks))
+		}
+	} else {
+		log.Printf("No task creation tasks found for processing")
 	}
 
 	// 2. Batch verify Twitter retweet tasks (this is an operation, not a task type!)
@@ -123,9 +168,21 @@ func (vs *ValidatorScheduler) processPendingTasks() {
 	if err != nil {
 		log.Printf("Error fetching twitter retweet tasks: %v", err)
 	} else if len(twitterTasks) > 0 {
-		log.Printf("Batch verifying %d twitter retweet tasks", len(twitterTasks))
-		vs.batchVerifyTwitterTasks(ctx, twitterTasks)
+		// Check and filter expired tasks
+		validTasks, err := vs.checkAndFilterExpiredTasks(ctx, twitterTasks)
+		if err != nil {
+			log.Printf("Error checking expired twitter tasks: %v", err)
+		} else if len(validTasks) > 0 {
+			log.Printf("Batch verifying %d twitter retweet tasks (filtered %d expired)", len(validTasks), len(twitterTasks)-len(validTasks))
+			vs.batchVerifyTwitterTasks(ctx, validTasks)
+		} else {
+			log.Printf("All %d twitter tasks have expired", len(twitterTasks))
+		}
+	} else {
+		log.Printf("No twitter retweet tasks found for processing")
 	}
+
+	log.Printf("✅ Completed daily task processing for %s", today.Format("2006-01-02"))
 }
 
 // getTasksByTypeAndStatus get tasks by type and status
@@ -162,9 +219,8 @@ func (vs *ValidatorScheduler) processTaskCreationTasks(ctx context.Context, task
 					log.Printf("Error updating TaskCreation status %s: %v", task.ID, err)
 				} else {
 					log.Printf("✅ TaskCreation %s completed successfully", task.ID)
-
-					// 🆕 NEW: Immediately distribute 50 points for TaskCreation
-					vs.distributeTaskCreationPoints(ctx, task)
+					// NOTE: TaskCreation points will be distributed during daily 0-point distribution
+					// as 5% commission to subnet creators
 				}
 			} else {
 				// Validation failed
@@ -207,47 +263,8 @@ func (vs *ValidatorScheduler) validateTaskCreationPayload(payload map[string]int
 	return false
 }
 
-// distributeTaskCreationPoints immediately distributes 50 points for TaskCreation completion
-func (vs *ValidatorScheduler) distributeTaskCreationPoints(ctx context.Context, task *models.Task) {
-	if vs.pointsClient == nil {
-		log.Printf("No points client available for TaskCreation %s", task.ID)
-		return
-	}
-
-	log.Printf("💰 Distributing 50 points for TaskCreation %s to user %s", task.ID, task.UserWallet)
-
-	// Create points distribution request for TaskCreation (fixed 50 points)
-	taskVLC := points.TaskVLC{
-		UserWallet: task.UserWallet,
-		TaskType:   "creation",
-		VLCValue:   50, // Fixed 50 points for TaskCreation
-		TaskID:     task.ID,
-	}
-
-	pointsReq := &points.PointsDistributionRequest{
-		BatchID:     fmt.Sprintf("task-creation-%s", task.ID),
-		TriggerType: "task_creation_completed",
-		Timestamp:   time.Now(),
-		Tasks:       []points.TaskVLC{taskVLC},
-	}
-
-	// Distribute points with timeout
-	ctxWithTimeout, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-
-	result, err := vs.pointsClient.DistributePoints(ctxWithTimeout, pointsReq)
-	if err != nil {
-		log.Printf("❌ Failed to distribute TaskCreation points for %s: %v", task.ID, err)
-	} else {
-		log.Printf("✅ TaskCreation points distributed successfully for %s", task.ID)
-		if result != nil && len(result.UserAllocations) > 0 {
-			userResult := result.UserAllocations[0]
-			if userResult.UpdateStatus == "success" {
-				log.Printf("   💰 User %s received %d points for TaskCreation", userResult.UserWallet[:10]+"...", userResult.RoundedPoints)
-			}
-		}
-	}
-}
+// NOTE: distributeTaskCreationPoints method removed
+// TaskCreation creators now receive 5% commission during daily 0-point distribution
 
 // batchVerifyTwitterTasks performs batch verification of Twitter retweet tasks
 // Uses batch round management for PoCW consensus
@@ -338,6 +355,33 @@ func (vs *ValidatorScheduler) SetBatchSize(size int) {
 	vs.mu.Lock()
 	defer vs.mu.Unlock()
 	vs.batchSize = size
+}
+
+// checkAndFilterExpiredTasks checks and marks expired tasks, returns valid tasks
+func (vs *ValidatorScheduler) checkAndFilterExpiredTasks(ctx context.Context, tasks []*models.Task) ([]*models.Task, error) {
+	var validTasks []*models.Task
+	now := time.Now()
+
+	for _, task := range tasks {
+		// Check if task is expired
+		if task.ExpiresAt != nil && now.After(*task.ExpiresAt) {
+			// Mark as expired if not already expired
+			if task.Status != models.TaskExpired {
+				if err := vs.taskService.updateTaskStatus(ctx, task.ID, models.TaskExpired); err != nil {
+					log.Printf("Failed to mark task %s as expired: %v", task.ID, err)
+				} else {
+					log.Printf("Task %s marked as expired (expired at: %v)", task.ID, *task.ExpiresAt)
+				}
+			}
+			// Skip expired tasks from processing
+			continue
+		}
+
+		// Task is still valid
+		validTasks = append(validTasks, task)
+	}
+
+	return validTasks, nil
 }
 
 // GetStats gets statistics information

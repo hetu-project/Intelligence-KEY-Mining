@@ -18,6 +18,7 @@ type BatchVerifier struct {
 	vlcService             *EnhancedVLCService
 	pointsClient           *points.Client              // Points service client
 	twitterVerificationSvc *TwitterVerificationService // New Twitter verification service
+	subnetService          *SubnetService              // Subnet service for duplicate checking
 
 	// Async processing queue
 	taskQueue chan *models.Task
@@ -55,7 +56,7 @@ type BatchVerificationResult struct {
 }
 
 // NewBatchVerifier creates batch verifier
-func NewBatchVerifier(taskService *TaskService, vlcService *EnhancedVLCService, pointsServiceURL string, workers int, twitterVerificationSvc *TwitterVerificationService) *BatchVerifier {
+func NewBatchVerifier(taskService *TaskService, vlcService *EnhancedVLCService, pointsServiceURL string, workers int, twitterVerificationSvc *TwitterVerificationService, subnetService *SubnetService) *BatchVerifier {
 	if workers <= 0 {
 		workers = 5 // Default 5 workers
 	}
@@ -70,6 +71,7 @@ func NewBatchVerifier(taskService *TaskService, vlcService *EnhancedVLCService, 
 		vlcService:             vlcService,
 		pointsClient:           pointsClient,
 		twitterVerificationSvc: twitterVerificationSvc,
+		subnetService:          subnetService,
 		taskQueue:              make(chan *models.Task, 1000), // Queue buffer
 		workers:                workers,
 		roundCompletionChan:    make(chan *models.BatchVerificationRound, 10), // Buffer for completed rounds
@@ -170,7 +172,7 @@ func (bv *BatchVerifier) processTask(ctx context.Context, task *models.Task, wor
 			}
 		} else {
 			log.Printf("Worker %d: Twitter verification service not available, marking task %s as incomplete", workerID, task.ID)
-			bv.handleTwitterTaskAsIncomplete(ctx, task, fmt.Errorf("Twitter verification service not configured"))
+			bv.handleTwitterTaskAsIncomplete(ctx, task, fmt.Errorf("twitter verification service not configured"))
 		}
 		return
 	}
@@ -426,7 +428,19 @@ func (bv *BatchVerifier) determineTaskType(tweetID string) string {
 
 // handleVerificationSuccess handles successful Twitter verification
 func (bv *BatchVerifier) handleVerificationSuccess(ctx context.Context, task *models.Task, result *TwitterVerificationResult) {
-	// Record verification proof but keep task status as PENDING_VERIFICATION for continuous verification
+	// 1. Check if user has already completed this task
+	if bv.subnetService != nil {
+		alreadyCompleted, err := bv.subnetService.CheckTaskCompletion(ctx, task.UserWallet, task.ID)
+		if err != nil {
+			log.Printf("Failed to check task completion for user %s, task %s: %v", task.UserWallet, task.ID, err)
+		} else if alreadyCompleted {
+			log.Printf("User %s has already completed task %s, skipping VLC increment and points", task.UserWallet, task.ID)
+			bv.trackTaskCompletion(task.ID, false) // Mark as processed but not rewarded
+			return
+		}
+	}
+
+	// 2. Record verification proof but keep task status as PENDING_VERIFICATION for continuous verification
 	proofData := map[string]interface{}{
 		"verification_result": result,
 		"verified_at":         time.Now(),
@@ -442,7 +456,7 @@ func (bv *BatchVerifier) handleVerificationSuccess(ctx context.Context, task *mo
 		return
 	}
 
-	// Increment VLC for verified Twitter task
+	// 3. Increment VLC for verified Twitter task (only if not duplicate)
 	if bv.vlcService != nil {
 		vlcPayload := map[string]interface{}{
 			"verification_type": "twitter_retweet_check",
@@ -451,6 +465,22 @@ func (bv *BatchVerifier) handleVerificationSuccess(ctx context.Context, task *mo
 		}
 		bv.vlcService.IncrementForTask(ctx, task.ID, models.TwitterRetweetTask, "verification", vlcPayload, task.UserWallet)
 		log.Printf("VLC incremented for user %s completing Twitter task %s", task.UserWallet, task.ID)
+	}
+
+	// 4. Record task completion to prevent future duplicates
+	if bv.subnetService != nil {
+		completion := &models.UserTaskCompletion{
+			UserWallet:   task.UserWallet,
+			TaskID:       task.ID,
+			SubnetID:     task.SubnetID,
+			CompletedAt:  time.Now(),
+			VLCIncrement: 1, // Assuming 1 VLC increment for Twitter tasks
+			PointsEarned: 0, // Points will be calculated during PoCW consensus
+		}
+
+		if err := bv.subnetService.RecordTaskCompletion(ctx, completion); err != nil {
+			log.Printf("Failed to record task completion for user %s, task %s: %v", task.UserWallet, task.ID, err)
+		}
 	}
 
 	// NOTE: Points distribution moved to PoCW consensus completion

@@ -7,6 +7,18 @@
 main
 serve-dashboard
 
+# Go service binaries
+services/miner-gateway/miner-gateway
+services/validator/validator
+services/points-service/points-service
+services/sbt-service/sbt-service
+
+# Any binary with service name in services directories
+services/*/miner-gateway
+services/*/validator
+services/*/points-service
+services/*/sbt-service
+
 # Go build artifacts
 *.test
 *.prof

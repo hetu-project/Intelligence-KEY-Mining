@@ -305,3 +305,86 @@ func (ps *PointsService) UpdateConfig(config *models.PointsConfig) {
 func (ps *PointsService) GetConfig() *models.PointsConfig {
 	return ps.config
 }
+
+// AddDirectPoints adds points directly to a user (for NFT bonuses, invitations, etc.)
+func (ps *PointsService) AddDirectPoints(ctx context.Context, req *models.DirectPointsRequest) error {
+	log.Printf("Adding %d points directly to user %s (source: %s)", req.Points, req.UserWallet, req.Source)
+
+	// 1. Check if user exists, create if not
+	if err := ps.ensureUserExists(ctx, req.UserWallet); err != nil {
+		return fmt.Errorf("failed to ensure user exists: %v", err)
+	}
+
+	// 2. Add points history record
+	today := time.Now().Format("2006-01-02")
+	pointsRecord := &models.PointsRecord{
+		WalletAddress: req.UserWallet,
+		Date:          today,
+		Source:        req.Source,
+		Points:        req.Points,
+		TxRef:         req.Reference,
+		CreatedAt:     time.Now(),
+	}
+
+	if err := ps.addPointsRecord(ctx, pointsRecord); err != nil {
+		return fmt.Errorf("failed to add points record: %v", err)
+	}
+
+	log.Printf("Successfully added %d points to user %s", req.Points, req.UserWallet)
+	return nil
+}
+
+// ensureUserExists ensures user exists in user_profiles table
+func (ps *PointsService) ensureUserExists(ctx context.Context, userWallet string) error {
+	// Check if user exists
+	var count int
+	checkQuery := `SELECT COUNT(*) FROM user_profiles WHERE wallet_address = ?`
+	err := ps.db.QueryRowContext(ctx, checkQuery, userWallet).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("failed to check user existence: %v", err)
+	}
+
+	if count > 0 {
+		return nil // User already exists
+	}
+
+	// Create user profile if not exists
+	createQuery := `
+		INSERT IGNORE INTO user_profiles (
+			wallet_address, display_name, registration_date, 
+			total_points, today_contribution, token_uri, ipfs_hash
+		) VALUES (?, ?, ?, 0, 0, '', '')
+	`
+
+	_, err = ps.db.ExecContext(ctx, createQuery,
+		userWallet,
+		userWallet, // Use wallet as display name initially
+		time.Now(),
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to create user profile: %v", err)
+	}
+
+	log.Printf("Created new user profile for wallet: %s", userWallet)
+	return nil
+}
+
+// addPointsRecord adds a points record to the database
+func (ps *PointsService) addPointsRecord(ctx context.Context, record *models.PointsRecord) error {
+	query := `
+		INSERT INTO points_history (wallet_address, date, source, points, tx_ref, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`
+
+	_, err := ps.db.ExecContext(ctx, query,
+		record.WalletAddress,
+		record.Date,
+		record.Source,
+		record.Points,
+		record.TxRef,
+		record.CreatedAt,
+	)
+
+	return err
+}

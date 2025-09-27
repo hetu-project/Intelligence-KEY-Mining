@@ -80,6 +80,9 @@ func main() {
 		pointsServiceURL = "http://localhost:8087" // Default points service URL
 	}
 
+	// Initialize SubnetService
+	subnetService := services.NewSubnetService(db)
+
 	// Initialize Twitter verification service (optional)
 	var twitterVerificationSvc *services.TwitterVerificationService
 	if cfg.TwitterRetweetCheckURL != "" {
@@ -88,7 +91,7 @@ func main() {
 	} else {
 		log.Printf("Twitter verification service disabled - no URL configured")
 	}
-	batchVerifier := services.NewBatchVerifier(taskService, enhancedVLCService, pointsServiceURL, 5, twitterVerificationSvc) // 5 workers
+	batchVerifier := services.NewBatchVerifier(taskService, enhancedVLCService, pointsServiceURL, 5, twitterVerificationSvc, subnetService) // 5 workers
 	taskCreationVerifier := verifiers.NewTaskCreationVerifier()
 	validatorScheduler := services.NewValidatorScheduler(taskService, taskCreationVerifier, batchVerifier, pointsServiceURL, cfg.ValidatorPollIntervalSeconds)
 
@@ -109,7 +112,7 @@ func main() {
 
 	// 6. Initialize handlers
 	taskHandler := handlers.NewTaskHandler(taskService)
-	taskCreationHandler := handlers.NewTaskCreationHandler(taskService)
+	taskCreationHandler := handlers.NewTaskCreationHandler(taskService, subnetService)
 	batchVerificationHandler := handlers.NewBatchVerificationHandler(taskService, batchVerifier)
 	healthHandler := handlers.NewHealthHandler(db)
 

@@ -83,3 +83,24 @@ type PointsStats struct {
 	LastDistribution   time.Time `json:"last_distribution"`   // Last distribution time
 	AvgPointsPerUser   float64   `json:"avg_points_per_user"` // Average points per user
 }
+
+// DirectPointsRequest represents a direct points addition request
+type DirectPointsRequest struct {
+	UserWallet  string                 `json:"user_wallet" validate:"required"`
+	Points      int                    `json:"points" validate:"required,min=1"`
+	Source      string                 `json:"source" validate:"required"`
+	Description string                 `json:"description,omitempty"`
+	Reference   string                 `json:"reference,omitempty"` // Transaction hash, invitation code, etc.
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// DirectPointsResponse represents a direct points addition response
+type DirectPointsResponse struct {
+	Success      bool   `json:"success"`
+	UserWallet   string `json:"user_wallet"`
+	PointsAdded  int    `json:"points_added"`
+	NewTotal     int    `json:"new_total"`
+	Source       string `json:"source"`
+	Message      string `json:"message,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
+}

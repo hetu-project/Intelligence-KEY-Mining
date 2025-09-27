@@ -1,10 +1,14 @@
 package models
 
+import "time"
+
 // TaskSubmitRequest represents a task submission request
 type TaskSubmitRequest struct {
 	UserWallet string                 `json:"user_wallet" binding:"required"`
 	TaskType   string                 `json:"task_type" binding:"required"`
 	Payload    map[string]interface{} `json:"payload" binding:"required"`
+	SubnetID   string                 `json:"subnet_id,omitempty"`
+	ExpiresAt  *time.Time             `json:"expires_at,omitempty"`
 }
 
 // TaskSubmitResponse represents a task submission response

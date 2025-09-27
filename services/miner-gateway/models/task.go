@@ -32,6 +32,7 @@ const (
 	TaskVoted               TaskStatus = "VOTED"
 	TaskConfirmed           TaskStatus = "CONFIRMED"
 	TaskRejected            TaskStatus = "REJECTED"
+	TaskExpired             TaskStatus = "EXPIRED"
 )
 
 // Task represents a user task in the system
@@ -48,6 +49,8 @@ type Task struct {
 	CompletedAt *time.Time             `json:"completed_at,omitempty" db:"completed_at"`
 	VLCClock    *vlc.VectorClock       `json:"vlc_clock,omitempty"`
 	EventID     string                 `json:"event_id,omitempty" db:"event_id"`
+	SubnetID    string                 `json:"subnet_id,omitempty" db:"subnet_id"`
+	ExpiresAt   *time.Time             `json:"expires_at,omitempty" db:"expires_at"`
 }
 
 // TaskProof represents verification proof from middle layer
