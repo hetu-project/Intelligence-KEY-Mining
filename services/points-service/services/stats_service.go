@@ -46,15 +46,16 @@ type UserRanking struct {
 
 // PointsHistoryItem represents a points history record
 type PointsHistoryItem struct {
-	ID          int64  `json:"id" db:"id"`
-	Date        string `json:"date" db:"date"`
-	Source      string `json:"source" db:"source"`
-	Points      int    `json:"points" db:"points"`
-	Description string `json:"description" db:"description"`
-	TxRef       string `json:"tx_ref" db:"tx_ref"`
-	SubnetID    string `json:"subnet_id" db:"subnet_id"`
-	SubnetName  string `json:"subnet_name" db:"subnet_name"`
-	CreatedAt   string `json:"created_at" db:"created_at"`
+	ID            int64  `json:"id" db:"id"`
+	WalletAddress string `json:"wallet_address" db:"wallet_address"`
+	Date          string `json:"date" db:"date"`
+	Source        string `json:"source" db:"source"`
+	Points        int    `json:"points" db:"points"`
+	Description   string `json:"description" db:"description"`
+	TxRef         string `json:"tx_ref" db:"tx_ref"`
+	SubnetID      string `json:"subnet_id" db:"subnet_id"`
+	SubnetName    string `json:"subnet_name" db:"subnet_name"`
+	CreatedAt     string `json:"created_at" db:"created_at"`
 }
 
 // OverallStats represents comprehensive system statistics
@@ -65,6 +66,40 @@ type OverallStats struct {
 	TotalTasks       int     `json:"total_tasks"`
 	CompletedTasks   int     `json:"completed_tasks"`
 	TodayPoints      int     `json:"today_points"`
+	TodayActiveUsers int     `json:"today_active_users"`
+	UsersWithNFT     int     `json:"users_with_nft"`
+	AvgPointsPerUser float64 `json:"avg_points_per_user"`
+}
+
+// SubnetLeader represents top user in a subnet
+type SubnetLeader struct {
+	SubnetID       string `json:"subnet_id" db:"subnet_id"`
+	SubnetName     string `json:"subnet_name" db:"subnet_name"`
+	SubnetIcon     string `json:"subnet_icon" db:"subnet_icon"`
+	UserWallet     string `json:"user_wallet" db:"user_wallet"`
+	DisplayName    string `json:"display_name" db:"display_name"`
+	TotalPoints    int    `json:"total_points" db:"total_points"`
+	CompletedTasks int    `json:"completed_tasks" db:"completed_tasks"`
+	Rank           int    `json:"rank"`
+}
+
+// DailyPerformer represents user who completed tasks today
+type DailyPerformer struct {
+	UserWallet     string `json:"user_wallet" db:"user_wallet"`
+	DisplayName    string `json:"display_name" db:"display_name"`
+	TasksCompleted int    `json:"tasks_completed" db:"tasks_completed"`
+	PointsEarned   int    `json:"points_earned" db:"points_earned"`
+	Rank           int    `json:"rank"`
+}
+
+// DashboardStats represents comprehensive dashboard statistics
+type DashboardStats struct {
+	TotalPoints      int     `json:"total_points"`
+	TotalUsers       int     `json:"total_users"`
+	ActiveMiners     int     `json:"active_miners"`
+	TotalSubnets     int     `json:"total_subnets"`
+	TodayPoints      int     `json:"today_points"`
+	ActiveTasksCount int     `json:"active_tasks_count"`
 	TodayActiveUsers int     `json:"today_active_users"`
 	UsersWithNFT     int     `json:"users_with_nft"`
 	AvgPointsPerUser float64 `json:"avg_points_per_user"`
@@ -353,6 +388,312 @@ func (ss *StatsService) GetOverallStats(ctx context.Context) (*OverallStats, err
 	if stats.TotalUsers > 0 {
 		stats.AvgPointsPerUser = float64(stats.TotalPoints) / float64(stats.TotalUsers)
 	}
+
+	return stats, nil
+}
+
+// GetUserSubnets gets subnets that a user has participated in
+func (ss *StatsService) GetUserSubnets(ctx context.Context, userWallet string) ([]*SubnetStats, error) {
+	query := `
+		SELECT DISTINCT 
+			s.id as subnet_id,
+			s.name as subnet_name,
+			s.icon as subnet_icon,
+			s.creator_wallet,
+			COUNT(DISTINCT t.id) as total_tasks,
+			COUNT(DISTINCT CASE WHEN t.status = 'CONFIRMED' THEN t.id END) as completed_tasks,
+			COUNT(DISTINCT utc.user_wallet) as unique_users,
+			COALESCE(SUM(utc.points_earned), 0) as total_points_distributed,
+			COALESCE(SUM(CASE WHEN DATE(utc.completed_at) = CURDATE() THEN utc.points_earned ELSE 0 END), 0) as today_points_distributed,
+			COUNT(DISTINCT CASE WHEN DATE(utc.completed_at) = CURDATE() THEN utc.user_wallet END) as today_active_users
+		FROM subnets s
+		LEFT JOIN tasks t ON s.id = t.subnet_id
+		LEFT JOIN user_task_completions utc ON t.id = utc.task_id
+		WHERE s.status = 'active' 
+		AND utc.user_wallet = ?
+		GROUP BY s.id, s.name, s.icon, s.creator_wallet
+		ORDER BY total_points_distributed DESC
+	`
+
+	rows, err := ss.db.QueryContext(ctx, query, userWallet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query user subnets: %v", err)
+	}
+	defer rows.Close()
+
+	var subnets []*SubnetStats
+	for rows.Next() {
+		var subnet SubnetStats
+		err := rows.Scan(
+			&subnet.SubnetID,
+			&subnet.SubnetName,
+			&subnet.SubnetIcon,
+			&subnet.CreatorWallet,
+			&subnet.TotalTasks,
+			&subnet.CompletedTasks,
+			&subnet.UniqueUsers,
+			&subnet.TotalPointsDistributed,
+			&subnet.TodayPointsDistributed,
+			&subnet.TodayActiveUsers,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan user subnet: %v", err)
+		}
+		subnets = append(subnets, &subnet)
+	}
+
+	return subnets, nil
+}
+
+// GetUserSubnetSummary gets a summary of user's subnet participation
+func (ss *StatsService) GetUserSubnetSummary(ctx context.Context, userWallet string) (map[string]interface{}, error) {
+	// Get basic stats
+	query := `
+		SELECT 
+			COUNT(DISTINCT utc.subnet_id) as participated_subnets,
+			COUNT(DISTINCT utc.task_id) as completed_tasks,
+			COALESCE(SUM(utc.points_earned), 0) as total_points_earned,
+			COALESCE(SUM(CASE WHEN DATE(utc.completed_at) = CURDATE() THEN utc.points_earned ELSE 0 END), 0) as today_points_earned
+		FROM user_task_completions utc
+		WHERE utc.user_wallet = ?
+	`
+
+	var participatedSubnets, completedTasks, totalPointsEarned, todayPointsEarned int
+	err := ss.db.QueryRowContext(ctx, query, userWallet).Scan(
+		&participatedSubnets, &completedTasks, &totalPointsEarned, &todayPointsEarned,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user subnet summary: %v", err)
+	}
+
+	// Get user subnets
+	subnets, err := ss.GetUserSubnets(ctx, userWallet)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"user_wallet":          userWallet,
+		"participated_subnets": participatedSubnets,
+		"completed_tasks":      completedTasks,
+		"total_points_earned":  totalPointsEarned,
+		"today_points_earned":  todayPointsEarned,
+		"subnets":              subnets,
+	}, nil
+}
+
+// GetActiveMinersCount gets count of users who have participated in retweet tasks (all time)
+func (ss *StatsService) GetActiveMinersCount(ctx context.Context) (int, error) {
+	query := `SELECT COUNT(DISTINCT user_wallet) FROM user_task_completions`
+
+	var activeMiners int
+	err := ss.db.QueryRowContext(ctx, query).Scan(&activeMiners)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get active miners count: %v", err)
+	}
+
+	return activeMiners, nil
+}
+
+// GetActiveTasksCount gets count of active (non-expired) tasks
+func (ss *StatsService) GetActiveTasksCount(ctx context.Context) (int, error) {
+	query := `
+		SELECT COUNT(*) 
+		FROM tasks 
+		WHERE expires_at > NOW() AND status != 'EXPIRED'
+	`
+
+	var activeTasks int
+	err := ss.db.QueryRowContext(ctx, query).Scan(&activeTasks)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get active tasks count: %v", err)
+	}
+
+	return activeTasks, nil
+}
+
+// GetSubnetLeaders gets top 3 users by points in each subnet with pagination
+func (ss *StatsService) GetSubnetLeaders(ctx context.Context, limit, offset int) ([]*SubnetLeader, int, error) {
+	// Get total count of subnets first
+	countQuery := `SELECT COUNT(*) FROM subnets WHERE status = 'active'`
+	var totalCount int
+	err := ss.db.QueryRowContext(ctx, countQuery).Scan(&totalCount)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get subnets count: %v", err)
+	}
+
+	// Get top 3 users per subnet with pagination
+	query := `
+		SELECT 
+			ranked_users.subnet_id,
+			s.name as subnet_name,
+			s.icon as subnet_icon,
+			ranked_users.user_wallet,
+			up.display_name,
+			ranked_users.total_points,
+			ranked_users.completed_tasks,
+			ranked_users.rank_in_subnet
+		FROM (
+			SELECT 
+				utc.subnet_id,
+				utc.user_wallet,
+				SUM(utc.points_earned) as total_points,
+				COUNT(utc.task_id) as completed_tasks,
+				ROW_NUMBER() OVER (PARTITION BY utc.subnet_id ORDER BY SUM(utc.points_earned) DESC) as rank_in_subnet
+			FROM user_task_completions utc
+			GROUP BY utc.subnet_id, utc.user_wallet
+		) ranked_users
+		INNER JOIN subnets s ON ranked_users.subnet_id = s.id
+		LEFT JOIN user_profiles up ON ranked_users.user_wallet = up.wallet_address
+		WHERE ranked_users.rank_in_subnet <= 3 AND s.status = 'active'
+		ORDER BY s.name, ranked_users.rank_in_subnet
+		LIMIT ? OFFSET ?
+	`
+
+	rows, err := ss.db.QueryContext(ctx, query, limit*3, offset*3) // limit*3 because we want top 3 per subnet
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query subnet leaders: %v", err)
+	}
+	defer rows.Close()
+
+	var leaders []*SubnetLeader
+	for rows.Next() {
+		var leader SubnetLeader
+		var displayName sql.NullString
+
+		err := rows.Scan(
+			&leader.SubnetID,
+			&leader.SubnetName,
+			&leader.SubnetIcon,
+			&leader.UserWallet,
+			&displayName,
+			&leader.TotalPoints,
+			&leader.CompletedTasks,
+			&leader.Rank,
+		)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to scan subnet leader: %v", err)
+		}
+
+		if displayName.Valid {
+			leader.DisplayName = displayName.String
+		} else {
+			leader.DisplayName = leader.UserWallet[:8] + "..." // Fallback display name
+		}
+
+		leaders = append(leaders, &leader)
+	}
+
+	return leaders, totalCount, nil
+}
+
+// GetDailyPerformers gets users who completed tasks today, ranked by task count
+func (ss *StatsService) GetDailyPerformers(ctx context.Context, limit, offset int) ([]*DailyPerformer, int, error) {
+	// Get total count first
+	countQuery := `
+		SELECT COUNT(DISTINCT user_wallet) 
+		FROM user_task_completions 
+		WHERE DATE(completed_at) = CURDATE()
+	`
+	var totalCount int
+	err := ss.db.QueryRowContext(ctx, countQuery).Scan(&totalCount)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get daily performers count: %v", err)
+	}
+
+	// Get daily performers ranked by tasks completed
+	query := `
+		SELECT 
+			utc.user_wallet,
+			up.display_name,
+			COUNT(utc.task_id) as tasks_completed,
+			COALESCE(SUM(utc.points_earned), 0) as points_earned,
+			ROW_NUMBER() OVER (ORDER BY COUNT(utc.task_id) DESC, SUM(utc.points_earned) DESC) as rank_num
+		FROM user_task_completions utc
+		LEFT JOIN user_profiles up ON utc.user_wallet = up.wallet_address
+		WHERE DATE(utc.completed_at) = CURDATE()
+		GROUP BY utc.user_wallet, up.display_name
+		ORDER BY tasks_completed DESC, points_earned DESC
+		LIMIT ? OFFSET ?
+	`
+
+	rows, err := ss.db.QueryContext(ctx, query, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query daily performers: %v", err)
+	}
+	defer rows.Close()
+
+	var performers []*DailyPerformer
+	for rows.Next() {
+		var performer DailyPerformer
+		var displayName sql.NullString
+
+		err := rows.Scan(
+			&performer.UserWallet,
+			&displayName,
+			&performer.TasksCompleted,
+			&performer.PointsEarned,
+			&performer.Rank,
+		)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to scan daily performer: %v", err)
+		}
+
+		if displayName.Valid {
+			performer.DisplayName = displayName.String
+		} else {
+			performer.DisplayName = performer.UserWallet[:8] + "..." // Fallback display name
+		}
+
+		performers = append(performers, &performer)
+	}
+
+	return performers, totalCount, nil
+}
+
+// GetDashboardStats gets comprehensive dashboard statistics
+func (ss *StatsService) GetDashboardStats(ctx context.Context) (*DashboardStats, error) {
+	stats := &DashboardStats{}
+
+	// Get total points
+	totalPoints, err := ss.GetTotalPoints(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stats.TotalPoints = totalPoints
+
+	// Get total users
+	totalUsers, err := ss.GetTotalUsers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stats.TotalUsers = totalUsers
+
+	// Get active miners count
+	activeMiners, err := ss.GetActiveMinersCount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stats.ActiveMiners = activeMiners
+
+	// Get active tasks count
+	activeTasks, err := ss.GetActiveTasksCount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stats.ActiveTasksCount = activeTasks
+
+	// Get other stats from existing overall stats
+	overallStats, err := ss.GetOverallStats(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	stats.TotalSubnets = overallStats.TotalSubnets
+	stats.TodayPoints = overallStats.TodayPoints
+	stats.TodayActiveUsers = overallStats.TodayActiveUsers
+	stats.UsersWithNFT = overallStats.UsersWithNFT
+	stats.AvgPointsPerUser = overallStats.AvgPointsPerUser
 
 	return stats, nil
 }

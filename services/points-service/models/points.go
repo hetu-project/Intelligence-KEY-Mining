@@ -4,6 +4,15 @@ import (
 	"time"
 )
 
+// Points source constants
+const (
+	PointsSourceTaskCreation      = "Task Creation"
+	PointsSourceTwitterRetweet    = "Twitter Retweet Task"
+	PointsSourceNFTPurchase       = "NFT Purchase Bonus"
+	PointsSourceInvitationReward  = "Invitation Reward"
+	PointsSourceCreatorCommission = "Creator Commission"
+)
+
 // PointsDistributionRequest points distribution request
 type PointsDistributionRequest struct {
 	BatchID     string    `json:"batch_id" validate:"required"`    // Batch ID

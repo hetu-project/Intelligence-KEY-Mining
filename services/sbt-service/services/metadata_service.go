@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -176,36 +178,66 @@ func (ms *MetadataService) GetDynamicMetadata(ctx context.Context, walletAddress
 		return nil, fmt.Errorf("failed to get user profile: %v", err)
 	}
 
-	// 2. Build dynamic attributes
+	// 2. Get additional mining statistics
+	miningTotalPoints, err := ms.getUserMiningTotalPoints(ctx, walletAddress)
+	if err != nil {
+		// Don't block, use 0 as fallback
+		miningTotalPoints = 0
+	}
+
+	consecutiveDays, err := ms.getUserConsecutiveMiningDays(ctx, walletAddress)
+	if err != nil {
+		// Don't block, use 0 as fallback
+		consecutiveDays = 0
+	}
+
+	// 3. Build dynamic attributes
 	dynamicAttrs := []models.Attribute{
 		{
-			TraitType:   "Total Points",
+			TraitType:   "总积分",
 			Value:       profile.TotalPoints,
 			DisplayType: "number",
 		},
 		{
-			TraitType:   "Today's Contribution",
+			TraitType:   "今日贡献",
 			Value:       profile.TodayContribution,
+			DisplayType: "number",
+		},
+		{
+			TraitType:   "累计挖矿积分",
+			Value:       miningTotalPoints,
+			DisplayType: "number",
+		},
+		{
+			TraitType:   "连续挖矿天数",
+			Value:       consecutiveDays,
 			DisplayType: "number",
 		},
 	}
 
-	// Add subnet membership
-	for _, subnet := range profile.Subnets {
+	// 4. Get user subnets from points-service API
+	userSubnets, err := ms.getUserSubnetsFromPointsService(ctx, walletAddress)
+	if err != nil {
+		// Fallback to profile subnets
+		userSubnets = profile.Subnets
+	}
+
+	// Add subnet membership to dynamic attributes
+	for _, subnet := range userSubnets {
 		dynamicAttrs = append(dynamicAttrs, models.Attribute{
 			TraitType: "Subnet Membership",
 			Value:     subnet.Name,
 		})
 	}
 
-	// 3. Get historical points records
+	// 5. Get historical points records
 	pointsRecords, err := ms.getPointsHistory(ctx, walletAddress)
 	if err != nil {
 		// Don't block, return empty records
 		pointsRecords = []models.PointsRecord{}
 	}
 
-	// 4. Get invitation information from third-party API
+	// 6. Get invitation information from third-party API
 	var invitationInfo *models.InvitationInfo
 	if ms.referralService != nil {
 		invitationInfo = ms.referralService.GetReferralInfoSafe(ctx, walletAddress)
@@ -220,7 +252,7 @@ func (ms *MetadataService) GetDynamicMetadata(ctx context.Context, walletAddress
 	return &models.DynamicMetadata{
 		DynamicAttributes:       dynamicAttrs,
 		HistoricalPointsRecords: pointsRecords,
-		Subnets:                 profile.Subnets,
+		Subnets:                 userSubnets, // Now using API data instead of profile.Subnets
 		SubnetNFTs:              profile.SubnetNFTs,
 		InvitationInfo:          invitationInfo,
 	}, nil
@@ -481,6 +513,169 @@ func (ms *MetadataService) updateDynamicDataOnIPFS(ctx context.Context, walletAd
 	}
 
 	return nil
+}
+
+// getUserMiningTotalPoints calculates total points earned from task completion (mining)
+func (ms *MetadataService) getUserMiningTotalPoints(ctx context.Context, walletAddress string) (int, error) {
+	query := `
+		SELECT COALESCE(SUM(points), 0) 
+		FROM points_history 
+		WHERE wallet_address = ? 
+		AND (source LIKE '%Task%' OR source LIKE '%Twitter%' OR source LIKE '%Retweet%')
+		AND source NOT LIKE '%NFT%' 
+		AND source NOT LIKE '%Invitation%'
+	`
+
+	var miningPoints int
+	err := ms.db.QueryRowContext(ctx, query, walletAddress).Scan(&miningPoints)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get mining total points: %v", err)
+	}
+
+	return miningPoints, nil
+}
+
+// getUserConsecutiveMiningDays calculates consecutive days of mining (task completion)
+func (ms *MetadataService) getUserConsecutiveMiningDays(ctx context.Context, walletAddress string) (int, error) {
+	// Get all distinct completion dates for this user, ordered by date descending
+	query := `
+		SELECT DISTINCT DATE(completed_at) as completion_date
+		FROM user_task_completions 
+		WHERE user_wallet = ? 
+		ORDER BY completion_date DESC
+	`
+
+	rows, err := ms.db.QueryContext(ctx, query, walletAddress)
+	if err != nil {
+		return 0, fmt.Errorf("failed to query completion dates: %v", err)
+	}
+	defer rows.Close()
+
+	var dates []time.Time
+	for rows.Next() {
+		var dateStr string
+		if err := rows.Scan(&dateStr); err != nil {
+			continue
+		}
+
+		// Parse date string (YYYY-MM-DD format)
+		date, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			continue
+		}
+		dates = append(dates, date)
+	}
+
+	if len(dates) == 0 {
+		return 0, nil
+	}
+
+	// Calculate consecutive days from the most recent date
+	consecutiveDays := 1
+	today := time.Now().Truncate(24 * time.Hour)
+
+	// Check if the most recent completion was today or yesterday
+	mostRecent := dates[0]
+	daysDiff := int(today.Sub(mostRecent).Hours() / 24)
+
+	// If last completion was more than 1 day ago, consecutive streak is broken
+	if daysDiff > 1 {
+		return 0, nil
+	}
+
+	// If last completion was today, start counting from today
+	// If last completion was yesterday, start counting from yesterday
+	if daysDiff == 1 {
+		consecutiveDays = 1
+	} else {
+		consecutiveDays = 1
+	}
+
+	// Count backward to find consecutive days
+	for i := 1; i < len(dates); i++ {
+		expectedDate := dates[i-1].AddDate(0, 0, -1)
+		if dates[i].Equal(expectedDate) {
+			consecutiveDays++
+		} else {
+			break
+		}
+	}
+
+	return consecutiveDays, nil
+}
+
+// getUserSubnetsFromPointsService gets user subnets from points-service API
+func (ms *MetadataService) getUserSubnetsFromPointsService(ctx context.Context, walletAddress string) ([]models.SubnetInfo, error) {
+	if ms.pointsClient == nil {
+		// Fallback: return empty subnets if no points service configured
+		return []models.SubnetInfo{}, nil
+	}
+
+	// Build API URL - need to access baseURL through a method or store it separately
+	// For now, we'll extract it from the pointsClient or use environment variable
+	pointsServiceURL := strings.TrimSuffix(os.Getenv("POINTS_SERVICE_URL"), "/")
+	if pointsServiceURL == "" {
+		log.Printf("Warning: POINTS_SERVICE_URL not set, cannot fetch user subnets")
+		return []models.SubnetInfo{}, nil
+	}
+	apiURL := fmt.Sprintf("%s/api/v1/stats/users/%s/subnets", pointsServiceURL, walletAddress)
+
+	// Create HTTP request
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %v", err)
+	}
+
+	// Make HTTP request
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		// Don't fail completely, return empty subnets
+		log.Printf("Warning: failed to get user subnets from points service: %v", err)
+		return []models.SubnetInfo{}, nil
+	}
+	defer resp.Body.Close()
+
+	// Check response status
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Warning: points service returned status %d for user subnets", resp.StatusCode)
+		return []models.SubnetInfo{}, nil
+	}
+
+	// Parse response
+	var apiResponse struct {
+		Success bool `json:"success"`
+		Data    struct {
+			UserWallet string `json:"user_wallet"`
+			Subnets    []struct {
+				SubnetID   string `json:"subnet_id"`
+				SubnetName string `json:"subnet_name"`
+				SubnetIcon string `json:"subnet_icon"`
+			} `json:"subnets"`
+			Count int `json:"count"`
+		} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
+		log.Printf("Warning: failed to decode user subnets response: %v", err)
+		return []models.SubnetInfo{}, nil
+	}
+
+	if !apiResponse.Success {
+		log.Printf("Warning: points service returned success=false for user subnets")
+		return []models.SubnetInfo{}, nil
+	}
+
+	// Convert to SubnetInfo format
+	var subnets []models.SubnetInfo
+	for _, subnet := range apiResponse.Data.Subnets {
+		subnets = append(subnets, models.SubnetInfo{
+			Name: subnet.SubnetName,
+			Icon: subnet.SubnetIcon,
+		})
+	}
+
+	return subnets, nil
 }
 
 // FormatIPFSURI formats IPFS hash as URI (imported from pinata_service)

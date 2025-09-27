@@ -237,3 +237,23 @@ func (nh *NFTHandler) CleanExpiredNFTCache(c *gin.Context) {
 		},
 	})
 }
+
+// RegisterRoutes registers HTTP routes for NFT operations
+func (nh *NFTHandler) RegisterRoutes(router *gin.RouterGroup) {
+	points := router.Group("/points")
+	{
+		// NFT and invitation reward endpoints
+		points.POST("/nft-purchase", nh.HandleNFTPurchaseBonus)
+		points.POST("/invitation-reward", nh.HandleInvitationReward)
+	}
+
+	nft := router.Group("/nft")
+	{
+		// NFT ownership check
+		nft.GET("/check/:wallet", nh.CheckNFTOwnership)
+
+		// NFT cache management (admin endpoints)
+		nft.GET("/cache/stats", nh.GetNFTCacheStats)
+		nft.POST("/cache/clean", nh.CleanExpiredNFTCache)
+	}
+}

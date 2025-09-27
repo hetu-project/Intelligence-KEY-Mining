@@ -30,9 +30,13 @@ func main() {
 
 	// Initialize services
 	pointsService := services.NewPointsService(db, config)
+	statsService := services.NewStatsService(db)
+	nftService := services.NewNFTService(db)
 
 	// Initialize handlers
 	pointsHandler := handlers.NewPointsHandler(pointsService)
+	statsHandler := handlers.NewStatsHandler(pointsService, statsService)
+	nftHandler := handlers.NewNFTHandler(pointsService, nftService)
 
 	// Initialize Gin router
 	router := gin.Default()
@@ -53,6 +57,8 @@ func main() {
 	// Register API routes
 	api := router.Group("/api/v1")
 	pointsHandler.RegisterRoutes(api)
+	statsHandler.RegisterRoutes(api)
+	nftHandler.RegisterRoutes(api)
 
 	// Start server
 	port := os.Getenv("PORT")
