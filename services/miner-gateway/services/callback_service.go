@@ -28,20 +28,24 @@ func NewCallbackService() *CallbackService {
 
 // PointsDistributionCallbackRequest represents the callback request
 type PointsDistributionCallbackRequest struct {
-	Address string `json:"address"`
+	Address           string `json:"address"`
+	AddFragmentNumber int    `json:"add_fragment_number"`
 }
 
 // PointsDistributionCallbackResponse represents the callback response
 type PointsDistributionCallbackResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message,omitempty"`
+	Success        bool   `json:"success"`
+	Message        string `json:"message,omitempty"`
+	Address        string `json:"address,omitempty"`
+	TotalFragments int    `json:"total_fragments,omitempty"`
 }
 
 // CallPointsDistributionCallback calls the third-party callback after points distribution
 func (cs *CallbackService) CallPointsDistributionCallback(ctx context.Context, userWallet string) {
 	// Use goroutine to avoid blocking the main flow
 	go func() {
-		success, err := cs.doCallbackRequest(context.Background(), userWallet)
+		// Default fragment number to 1
+		success, err := cs.doCallbackRequest(context.Background(), userWallet, 1)
 		if err != nil {
 			log.Printf("Points distribution callback failed for user %s: %v", userWallet, err)
 		} else if success {
@@ -64,7 +68,8 @@ func (cs *CallbackService) CallPointsDistributionCallbackBatch(ctx context.Conte
 
 		successCount := 0
 		for _, wallet := range userWallets {
-			success, err := cs.doCallbackRequest(context.Background(), wallet)
+			// Default fragment number to 1 for batch processing
+			success, err := cs.doCallbackRequest(context.Background(), wallet, 1)
 			if err != nil {
 				log.Printf("Callback failed for user %s: %v", wallet, err)
 			} else if success {
@@ -82,7 +87,7 @@ func (cs *CallbackService) CallPointsDistributionCallbackBatch(ctx context.Conte
 }
 
 // doCallbackRequest performs the actual HTTP request
-func (cs *CallbackService) doCallbackRequest(ctx context.Context, userWallet string) (bool, error) {
+func (cs *CallbackService) doCallbackRequest(ctx context.Context, userWallet string, fragmentNumber int) (bool, error) {
 	callbackURL := os.Getenv("POINTS_DISTRIBUTION_CALLBACK_URL")
 	if callbackURL == "" {
 		// No callback URL configured, skip silently
@@ -91,7 +96,8 @@ func (cs *CallbackService) doCallbackRequest(ctx context.Context, userWallet str
 
 	// Create request body
 	requestBody := PointsDistributionCallbackRequest{
-		Address: userWallet,
+		Address:           userWallet,
+		AddFragmentNumber: fragmentNumber,
 	}
 
 	requestJSON, err := json.Marshal(requestBody)
