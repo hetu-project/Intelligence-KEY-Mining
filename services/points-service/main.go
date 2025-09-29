@@ -44,7 +44,7 @@ func main() {
 	// Add middleware
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
-	router.Use(corsMiddleware())
+	// router.Use(corsMiddleware())  // 注释掉，让nginx处理CORS
 
 	// Health check
 	router.GET("/health", func(c *gin.Context) {

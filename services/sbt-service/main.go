@@ -139,12 +139,12 @@ func setupRouter(metadataService *services.MetadataService, blockchainService *s
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
 
-	// CORS configuration
-	config := cors.DefaultConfig()
-	config.AllowAllOrigins = true
-	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
-	config.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With"}
-	router.Use(cors.New(config))
+	// CORS configuration - 注释掉，让nginx处理CORS
+	// config := cors.DefaultConfig()
+	// config.AllowAllOrigins = true
+	// config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
+	// config.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With"}
+	// router.Use(cors.New(config))
 
 	// Health check
 	router.GET("/health", func(c *gin.Context) {

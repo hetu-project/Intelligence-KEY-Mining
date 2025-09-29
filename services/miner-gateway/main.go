@@ -168,7 +168,7 @@ func setupRoutes(
 	// Middleware
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
-	router.Use(middleware.CORS())
+	// router.Use(middleware.CORS())  // 注释掉，让nginx处理CORS
 	router.Use(middleware.RateLimit())
 
 	// Health check

@@ -19,12 +19,16 @@ CREATE TABLE IF NOT EXISTS tasks (
     completed_at TIMESTAMP NULL,
     event_id VARCHAR(100) NULL,
     vlc_clock JSON NULL,
+    subnet_id VARCHAR(36) NULL,
+    expires_at TIMESTAMP NULL,
     
     INDEX idx_user_wallet (user_wallet),
     INDEX idx_task_type (task_type),
     INDEX idx_status (status),
     INDEX idx_created_at (created_at),
-    INDEX idx_event_id (event_id)
+    INDEX idx_event_id (event_id),
+    INDEX idx_subnet_id (subnet_id),
+    INDEX idx_expires_at (expires_at)
 );
 
 -- Task status history
@@ -616,6 +620,106 @@ CREATE USER IF NOT EXISTS 'sbt_service'@'%' IDENTIFIED BY 'secure_password_3';
 GRANT ALL PRIVILEGES ON user_profiles TO 'sbt_service'@'%';
 GRANT ALL PRIVILEGES ON points_history TO 'sbt_service'@'%';
 GRANT ALL PRIVILEGES ON invite_relations TO 'sbt_service'@'%';
+
+-- ============================================
+-- New Tables for Enhanced Points Module
+-- ============================================
+
+-- Subnets table - 子网管理
+CREATE TABLE IF NOT EXISTS subnets (
+    id VARCHAR(36) PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    icon VARCHAR(500) NULL,
+    creator_wallet VARCHAR(42) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    status VARCHAR(20) DEFAULT 'active',
+    
+    UNIQUE KEY unique_subnet_name (name),
+    INDEX idx_creator_wallet (creator_wallet),
+    INDEX idx_status (status),
+    INDEX idx_created_at (created_at),
+    
+    FOREIGN KEY (creator_wallet) REFERENCES user_profiles(wallet_address) ON DELETE CASCADE
+);
+
+-- User task completions - 防重复完成任务
+CREATE TABLE IF NOT EXISTS user_task_completions (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_wallet VARCHAR(42) NOT NULL,
+    task_id VARCHAR(36) NOT NULL,
+    subnet_id VARCHAR(36) NULL,
+    completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    vlc_increment INT DEFAULT 0,
+    points_earned INT DEFAULT 0,
+    
+    UNIQUE KEY unique_user_task (user_wallet, task_id),
+    INDEX idx_user_wallet (user_wallet),
+    INDEX idx_task_id (task_id),
+    INDEX idx_subnet_id (subnet_id),
+    INDEX idx_completed_at (completed_at),
+    
+    FOREIGN KEY (user_wallet) REFERENCES user_profiles(wallet_address) ON DELETE CASCADE,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (subnet_id) REFERENCES subnets(id) ON DELETE SET NULL
+);
+
+-- Daily distribution log - 每日分发记录
+CREATE TABLE IF NOT EXISTS daily_distribution_log (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    distribution_date DATE NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    total_points_distributed INT DEFAULT 0,
+    total_users_affected INT DEFAULT 0,
+    total_tasks_processed INT DEFAULT 0,
+    started_at TIMESTAMP NOT NULL,
+    completed_at TIMESTAMP NULL,
+    error_message TEXT NULL,
+    metadata JSON NULL,
+    
+    UNIQUE KEY unique_distribution_date (distribution_date),
+    INDEX idx_status (status),
+    INDEX idx_distribution_date (distribution_date),
+    INDEX idx_started_at (started_at)
+);
+
+-- NFT ownership cache - NFT所有权缓存
+CREATE TABLE IF NOT EXISTS nft_ownership_cache (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_wallet VARCHAR(42) NOT NULL,
+    has_nft BOOLEAN DEFAULT FALSE,
+    checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL,
+    api_response TEXT NULL,
+    
+    UNIQUE KEY unique_user_wallet (user_wallet),
+    INDEX idx_expires_at (expires_at),
+    INDEX idx_has_nft (has_nft),
+    
+    FOREIGN KEY (user_wallet) REFERENCES user_profiles(wallet_address) ON DELETE CASCADE
+);
+
+-- Invitation rewards - 邀请奖励记录
+CREATE TABLE IF NOT EXISTS invitation_rewards (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    inviter_wallet VARCHAR(42) NOT NULL,
+    invitee_wallet VARCHAR(42) NOT NULL,
+    reward_points INT NOT NULL,
+    inviter_has_nft BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    points_history_id BIGINT NULL,
+    source VARCHAR(50) DEFAULT 'invitation_reward',
+    reference VARCHAR(100) NULL,
+    
+    UNIQUE KEY unique_invitation (inviter_wallet, invitee_wallet),
+    INDEX idx_inviter_wallet (inviter_wallet),
+    INDEX idx_invitee_wallet (invitee_wallet),
+    INDEX idx_created_at (created_at),
+    INDEX idx_points_history_id (points_history_id),
+    
+    FOREIGN KEY (inviter_wallet) REFERENCES user_profiles(wallet_address) ON DELETE CASCADE,
+    FOREIGN KEY (invitee_wallet) REFERENCES user_profiles(wallet_address) ON DELETE CASCADE
+);
 
 FLUSH PRIVILEGES;
 */
