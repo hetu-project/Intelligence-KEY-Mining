@@ -623,6 +623,7 @@ CREATE USER IF NOT EXISTS 'sbt_service'@'%' IDENTIFIED BY 'secure_password_3';
 GRANT ALL PRIVILEGES ON user_profiles TO 'sbt_service'@'%';
 GRANT ALL PRIVILEGES ON points_history TO 'sbt_service'@'%';
 GRANT ALL PRIVILEGES ON invite_relations TO 'sbt_service'@'%';
+*/
 
 -- ============================================
 -- New Tables for Enhanced Points Module
