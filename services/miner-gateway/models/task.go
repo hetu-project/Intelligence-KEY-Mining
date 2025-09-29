@@ -103,14 +103,15 @@ type MinerOutput struct {
 
 // TaskCreationRequest represents task creation request
 type TaskCreationRequest struct {
-	UserWallet      string `json:"user_wallet" binding:"required"`
-	TaskType        string `json:"task_type" binding:"required"` // API task type string
-	ProjectName     string `json:"project_name" binding:"required"`
-	ProjectIcon     string `json:"project_icon"`
-	Description     string `json:"description" binding:"required"`
-	TwitterUsername string `json:"twitter_username" binding:"required"`
-	TwitterLink     string `json:"twitter_link" binding:"required"`
-	TweetID         string `json:"tweet_id" binding:"required"`
+	UserWallet      string    `json:"user_wallet" binding:"required"`
+	TaskType        string    `json:"task_type" binding:"required"` // API task type string
+	ProjectName     string    `json:"project_name" binding:"required"`
+	ProjectIcon     string    `json:"project_icon"`
+	Description     string    `json:"description" binding:"required"`
+	TwitterUsername string    `json:"twitter_username" binding:"required"`
+	TwitterLink     string    `json:"twitter_link" binding:"required"`
+	TweetID         string    `json:"tweet_id" binding:"required"`
+	Deadline        time.Time `json:"deadline" binding:"required"` // Task deadline
 }
 
 // TaskCreationResponse represents task creation response

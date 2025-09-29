@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -90,9 +91,51 @@ func (vs *ValidatorScheduler) Stop() {
 	log.Println("ValidatorScheduler stopped")
 }
 
-// schedulerLoop main scheduler loop - NEW: Daily midnight execution
+// schedulerLoop main scheduler loop - supports both auto and daily modes
 func (vs *ValidatorScheduler) schedulerLoop() {
-	log.Printf("ValidatorScheduler starting with daily midnight execution")
+	// Get scheduler mode from environment variable
+	schedulerMode := os.Getenv("SCHEDULER_MODE")
+	if schedulerMode == "" {
+		schedulerMode = "daily" // Default to daily mode for production
+	}
+
+	log.Printf("ValidatorScheduler starting in %s mode", schedulerMode)
+
+	if schedulerMode == "auto" {
+		// Auto mode: Use VALIDATOR_POLL_INTERVAL_SECONDS for testing
+		vs.runAutoMode()
+	} else {
+		// Daily mode: Fixed midnight execution for production
+		vs.runDailyMode()
+	}
+}
+
+// runAutoMode runs scheduler in auto mode (for testing)
+func (vs *ValidatorScheduler) runAutoMode() {
+	log.Printf("🔄 Auto mode: Running validation every %v", vs.pollInterval)
+
+	// Start immediately
+	log.Printf("🔄 Running initial validation at %v", time.Now().Format("2006-01-02 15:04:05"))
+	vs.processPendingTasks()
+
+	// Then run at regular intervals
+	ticker := time.NewTicker(vs.pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-vs.ctx.Done():
+			return
+		case <-ticker.C:
+			log.Printf("🔄 Running scheduled validation at %v", time.Now().Format("2006-01-02 15:04:05"))
+			vs.processPendingTasks()
+		}
+	}
+}
+
+// runDailyMode runs scheduler in daily mode (for production)
+func (vs *ValidatorScheduler) runDailyMode() {
+	log.Printf("🌙 Daily mode: Running validation at midnight daily")
 
 	// Calculate time until next midnight
 	now := time.Now()

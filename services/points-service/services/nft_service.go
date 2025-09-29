@@ -30,9 +30,15 @@ func NewNFTService(db *sql.DB) *NFTService {
 	}
 }
 
+// NFTCheckRequest represents the request to NFT check API
+type NFTCheckRequest struct {
+	Address string `json:"address"`
+}
+
 // NFTCheckResponse represents the response from NFT check API
 type NFTCheckResponse struct {
-	HasNFT  bool   `json:"has_nft"`
+	Success bool   `json:"success"`
+	Hold    bool   `json:"hold"`
 	Message string `json:"message,omitempty"`
 	Error   string `json:"error,omitempty"`
 }
@@ -73,10 +79,17 @@ func (ns *NFTService) callNFTCheckAPI(ctx context.Context, userWallet string) (b
 		return false, "", fmt.Errorf("NFT_CHECK_API_URL not configured")
 	}
 
-	// Replace {wallet} placeholder with actual wallet address
-	apiURL = strings.ReplaceAll(apiURL, "{wallet}", userWallet)
+	// Create request body
+	requestBody := NFTCheckRequest{
+		Address: userWallet,
+	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	requestJSON, err := json.Marshal(requestBody)
+	if err != nil {
+		return false, "", fmt.Errorf("failed to marshal request: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, strings.NewReader(string(requestJSON)))
 	if err != nil {
 		return false, "", fmt.Errorf("failed to create request: %v", err)
 	}
@@ -104,20 +117,14 @@ func (ns *NFTService) callNFTCheckAPI(ctx context.Context, userWallet string) (b
 
 	var nftResp NFTCheckResponse
 	if err := json.Unmarshal(body, &nftResp); err != nil {
-		// Try to parse as boolean response
-		if strings.ToLower(strings.TrimSpace(string(body))) == "true" {
-			return true, string(body), nil
-		} else if strings.ToLower(strings.TrimSpace(string(body))) == "false" {
-			return false, string(body), nil
-		}
 		return false, string(body), fmt.Errorf("failed to parse response: %v", err)
 	}
 
-	if nftResp.Error != "" {
-		return false, string(body), fmt.Errorf("API error: %s", nftResp.Error)
+	if !nftResp.Success {
+		return false, string(body), fmt.Errorf("API returned success=false: %s", nftResp.Message)
 	}
 
-	return nftResp.HasNFT, string(body), nil
+	return nftResp.Hold, string(body), nil
 }
 
 // getCachedNFTStatus gets cached NFT status

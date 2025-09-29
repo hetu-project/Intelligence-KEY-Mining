@@ -84,6 +84,7 @@ type RoundCoordinator struct {
 	validatorClient    *ValidatorClient
 	batchVerifier      *BatchVerifier
 	pointsClient       *points.Client
+	callbackService    *CallbackService
 
 	// Round management
 	currentRound *Round
@@ -125,6 +126,7 @@ func NewRoundCoordinator(
 		validatorClient:    validatorClient,
 		batchVerifier:      batchVerifier,
 		pointsClient:       pointsClient,
+		callbackService:    NewCallbackService(),
 		roundHistory:       make([]*Round, 0),
 		roundInterval:      time.Duration(roundIntervalSeconds) * time.Second,
 		consensusDelay:     time.Duration(consensusDelaySeconds) * time.Second,
@@ -615,6 +617,21 @@ func (rc *RoundCoordinator) distributeBatchRoundPoints(batchTask *models.Task) {
 
 	// 2. Calculate and distribute 5% commission to subnet creators
 	rc.distributeCreatorCommissions(ctx, verifiedTasksData, roundID)
+
+	// 3. Call third-party callback after points distribution
+	if rc.callbackService != nil && result != nil {
+		var successfulUsers []string
+		for _, userResult := range result.UserAllocations {
+			if userResult.UpdateStatus == "success" {
+				successfulUsers = append(successfulUsers, userResult.UserWallet)
+			}
+		}
+
+		if len(successfulUsers) > 0 {
+			log.Printf("🔄 Calling points distribution callback for %d users", len(successfulUsers))
+			rc.callbackService.CallPointsDistributionCallbackBatch(ctx, successfulUsers)
+		}
+	}
 }
 
 // getVerifiedTasksFromBatch retrieves the actual verified tasks from the batch verifier

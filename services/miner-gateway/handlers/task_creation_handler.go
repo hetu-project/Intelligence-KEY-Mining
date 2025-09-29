@@ -39,6 +39,7 @@ func parseIntParam(param string, min, max int) (int, error) {
 }
 
 // getTaskExpiryDays gets task expiry days from environment variable
+// DEPRECATED: Now using deadline field from API request
 func getTaskExpiryDays() int {
 	expiryDaysStr := os.Getenv("TASK_EXPIRY_DAYS")
 	if expiryDaysStr == "" {
@@ -101,9 +102,17 @@ func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 		subnetID = subnet.ID
 	}
 
-	// Calculate task expiry time
-	expiryDays := getTaskExpiryDays()
-	expiresAt := time.Now().AddDate(0, 0, expiryDays)
+	// Validate deadline from API request
+	now := time.Now()
+	if req.Deadline.Before(now) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Deadline must be in the future",
+		})
+		return
+	}
+
+	expiresAt := req.Deadline
 
 	// Build task submission request
 	taskReq := &models.TaskSubmitRequest{
