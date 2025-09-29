@@ -1,9 +1,6 @@
 -- PoCW Database Schema
 -- Designed for multi-service architecture
 
--- Disable foreign key checks temporarily to avoid creation issues
-SET FOREIGN_KEY_CHECKS = 0;
-
 -- ============================================
 -- 1. Task Management (used by MinerGateway)
 -- ============================================
@@ -724,8 +721,5 @@ CREATE TABLE IF NOT EXISTS invitation_rewards (
     FOREIGN KEY (inviter_wallet) REFERENCES user_profiles(wallet_address) ON DELETE CASCADE,
     FOREIGN KEY (invitee_wallet) REFERENCES user_profiles(wallet_address) ON DELETE CASCADE
 );
-
--- Re-enable foreign key checks
-SET FOREIGN_KEY_CHECKS = 1;
 
 FLUSH PRIVILEGES;
