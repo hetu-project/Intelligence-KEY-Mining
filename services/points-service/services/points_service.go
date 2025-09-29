@@ -330,6 +330,14 @@ func (ps *PointsService) AddDirectPoints(ctx context.Context, req *models.Direct
 		return fmt.Errorf("failed to add points record: %v", err)
 	}
 
+	// 3. Update user's total points in user_profiles table
+	updateQuery := `UPDATE user_profiles SET total_points = total_points + ? WHERE wallet_address = ?`
+	_, err := ps.db.ExecContext(ctx, updateQuery, req.Points, req.UserWallet)
+	if err != nil {
+		log.Printf("Warning: Failed to update total_points for user %s: %v", req.UserWallet, err)
+		// Don't return error, as the points record was already added successfully
+	}
+
 	log.Printf("Successfully added %d points to user %s", req.Points, req.UserWallet)
 	return nil
 }
