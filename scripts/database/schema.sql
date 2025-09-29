@@ -1,6 +1,9 @@
 -- PoCW Database Schema
 -- Designed for multi-service architecture
 
+-- Disable foreign key checks temporarily to avoid creation issues
+SET FOREIGN_KEY_CHECKS = 0;
+
 -- ============================================
 -- 1. Task Management (used by MinerGateway)
 -- ============================================
@@ -657,7 +660,11 @@ CREATE TABLE IF NOT EXISTS user_task_completions (
     INDEX idx_user_wallet (user_wallet),
     INDEX idx_task_id (task_id),
     INDEX idx_subnet_id (subnet_id),
-    INDEX idx_completed_at (completed_at)
+    INDEX idx_completed_at (completed_at),
+    
+    FOREIGN KEY (user_wallet) REFERENCES user_profiles(wallet_address) ON DELETE CASCADE,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (subnet_id) REFERENCES subnets(id) ON DELETE SET NULL
 );
 
 -- Daily distribution log - 每日分发记录
@@ -690,7 +697,9 @@ CREATE TABLE IF NOT EXISTS nft_ownership_cache (
     
     UNIQUE KEY unique_user_wallet (user_wallet),
     INDEX idx_expires_at (expires_at),
-    INDEX idx_has_nft (has_nft)
+    INDEX idx_has_nft (has_nft),
+    
+    FOREIGN KEY (user_wallet) REFERENCES user_profiles(wallet_address) ON DELETE CASCADE
 );
 
 -- Invitation rewards - 邀请奖励记录
@@ -709,7 +718,13 @@ CREATE TABLE IF NOT EXISTS invitation_rewards (
     INDEX idx_inviter_wallet (inviter_wallet),
     INDEX idx_invitee_wallet (invitee_wallet),
     INDEX idx_created_at (created_at),
-    INDEX idx_points_history_id (points_history_id)
+    INDEX idx_points_history_id (points_history_id),
+    
+    FOREIGN KEY (inviter_wallet) REFERENCES user_profiles(wallet_address) ON DELETE CASCADE,
+    FOREIGN KEY (invitee_wallet) REFERENCES user_profiles(wallet_address) ON DELETE CASCADE
 );
+
+-- Re-enable foreign key checks
+SET FOREIGN_KEY_CHECKS = 1;
 
 FLUSH PRIVILEGES;
