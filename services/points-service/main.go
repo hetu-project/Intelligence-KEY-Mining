@@ -76,16 +76,10 @@ func main() {
 
 // initDatabase initializes database connection
 func initDatabase() (*sql.DB, error) {
-	// Get database configuration from environment variables
-	dbHost := getEnv("DB_HOST", "localhost")
-	dbPort := getEnv("DB_PORT", "3306")
-	dbUser := getEnv("DB_USER", "root")
-	dbPass := getEnv("DB_PASSWORD", "")
-	dbName := getEnv("DB_NAME", "hetu_key_mining")
+	// Use DATABASE_URL like other services for consistency
+	databaseURL := getEnv("DATABASE_URL", "mysql://pocw_user:pocw_password@localhost:3306/pocw_db")
 
-	dsn := dbUser + ":" + dbPass + "@tcp(" + dbHost + ":" + dbPort + ")/" + dbName + "?charset=utf8mb4&parseTime=True&loc=Local"
-
-	db, err := sql.Open("mysql", dsn)
+	db, err := sql.Open("mysql", databaseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +93,7 @@ func initDatabase() (*sql.DB, error) {
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(5)
 
-	log.Printf("Database connected successfully to %s:%s/%s", dbHost, dbPort, dbName)
+	log.Printf("Database connected successfully: %s", databaseURL)
 	return db, nil
 }
 
