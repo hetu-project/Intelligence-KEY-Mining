@@ -773,9 +773,15 @@ func (rc *RoundCoordinator) distributeIndividualTaskPoints(task *models.Task) {
 
 	log.Printf("🎯 PoCW Consensus Approved: Distributing points for task %s", task.ID)
 
+	// Map task type to points service format
+	pointsTaskType := "retweet"
+	if task.TaskType == "task_creation" {
+		pointsTaskType = "creation"
+	}
+
 	taskVLC := points.TaskVLC{
 		UserWallet: task.UserWallet,
-		TaskType:   string(task.TaskType),
+		TaskType:   pointsTaskType,
 		VLCValue:   1, // VLC value for this task
 		TaskID:     task.ID,
 	}
