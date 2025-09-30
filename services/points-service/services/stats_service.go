@@ -133,7 +133,25 @@ func (ss *StatsService) GetTotalUsers(ctx context.Context) (int, error) {
 
 // GetSubnetStats gets subnet statistics
 func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, error) {
-	query := `SELECT * FROM subnet_stats ORDER BY total_points_distributed DESC`
+	query := `
+		SELECT 
+			s.id as subnet_id,
+			s.name as subnet_name,
+			s.icon as subnet_icon,
+			s.creator_wallet,
+			COUNT(DISTINCT t.id) as total_tasks,
+			COUNT(DISTINCT CASE WHEN utc.points_earned > 0 THEN t.id END) as completed_tasks,
+			COUNT(DISTINCT utc.user_wallet) as unique_users,
+			COALESCE(SUM(utc.points_earned), 0) as total_points_distributed,
+			COALESCE(SUM(CASE WHEN DATE(utc.completed_at) = CURDATE() THEN utc.points_earned ELSE 0 END), 0) as today_points_distributed,
+			COUNT(DISTINCT CASE WHEN DATE(utc.completed_at) = CURDATE() THEN utc.user_wallet END) as today_active_users
+		FROM subnets s
+		LEFT JOIN tasks t ON s.id = t.subnet_id
+		LEFT JOIN user_task_completions utc ON t.id = utc.task_id
+		WHERE s.status = 'active'
+		GROUP BY s.id, s.name, s.icon, s.creator_wallet
+		ORDER BY total_points_distributed DESC
+	`
 
 	rows, err := ss.db.QueryContext(ctx, query)
 	if err != nil {
@@ -167,7 +185,24 @@ func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, err
 
 // GetSubnetDetails gets detailed statistics for a specific subnet
 func (ss *StatsService) GetSubnetDetails(ctx context.Context, subnetID string) (*SubnetStats, error) {
-	query := `SELECT * FROM subnet_stats WHERE subnet_id = ?`
+	query := `
+		SELECT 
+			s.id as subnet_id,
+			s.name as subnet_name,
+			s.icon as subnet_icon,
+			s.creator_wallet,
+			COUNT(DISTINCT t.id) as total_tasks,
+			COUNT(DISTINCT CASE WHEN utc.points_earned > 0 THEN t.id END) as completed_tasks,
+			COUNT(DISTINCT utc.user_wallet) as unique_users,
+			COALESCE(SUM(utc.points_earned), 0) as total_points_distributed,
+			COALESCE(SUM(CASE WHEN DATE(utc.completed_at) = CURDATE() THEN utc.points_earned ELSE 0 END), 0) as today_points_distributed,
+			COUNT(DISTINCT CASE WHEN DATE(utc.completed_at) = CURDATE() THEN utc.user_wallet END) as today_active_users
+		FROM subnets s
+		LEFT JOIN tasks t ON s.id = t.subnet_id
+		LEFT JOIN user_task_completions utc ON t.id = utc.task_id
+		WHERE s.status = 'active' AND s.id = ?
+		GROUP BY s.id, s.name, s.icon, s.creator_wallet
+	`
 
 	var stat SubnetStats
 	err := ss.db.QueryRowContext(ctx, query, subnetID).Scan(
