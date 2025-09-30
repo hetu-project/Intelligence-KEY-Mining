@@ -692,3 +692,8 @@ func (ts *TaskService) GetTasksByTypeAndStatus(ctx context.Context, taskType, st
 
 	return tasks, nil
 }
+
+// GetDB returns the database connection for internal service use
+func (ts *TaskService) GetDB() *sql.DB {
+	return ts.db
+}

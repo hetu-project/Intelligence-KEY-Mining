@@ -244,14 +244,24 @@ func (rc *RoundCoordinator) startRound() (*Round, error) {
 
 	// Create new round
 	roundID := fmt.Sprintf("round_%d", time.Now().Unix())
+
+	// Get completed tasks that need points distribution
+	completedTasks, err := rc.getCompletedTasksForConsensus()
+	if err != nil {
+		log.Printf("Error getting completed tasks for consensus: %v", err)
+		completedTasks = make([]*models.Task, 0)
+	}
+
 	round := &Round{
 		ID:           roundID,
 		StartTime:    time.Now(),
 		Phase:        RoundPhaseTaskProcess,
-		Tasks:        make([]*models.Task, 0),
+		Tasks:        completedTasks,
 		QualityVotes: make([]QualityVote, 0),
 		Metadata:     make(map[string]interface{}),
 	}
+
+	log.Printf("Round %s started with %d completed tasks for consensus", roundID, len(completedTasks))
 
 	// Record initial VLC state
 	round.MinerVLCBefore = rc.enhancedVLCService.GetMinerVLC()
@@ -265,6 +275,98 @@ func (rc *RoundCoordinator) startRound() (*Round, error) {
 	rc.currentRound = round
 
 	return round, nil
+}
+
+// getCompletedTasksForConsensus gets user completions that haven't received points distribution
+func (rc *RoundCoordinator) getCompletedTasksForConsensus() ([]*models.Task, error) {
+	// Query user_task_completions for completed tasks with points_earned = 0
+	// Create synthetic tasks for each user completion
+	query := `
+		SELECT utc.user_wallet, t.id, t.task_type, t.status, t.payload, t.proof, t.attempts,
+		       t.created_at, t.updated_at, t.completed_at, t.event_id, t.vlc_clock, t.subnet_id, t.expires_at,
+		       utc.completed_at as user_completed_at
+		FROM user_task_completions utc
+		INNER JOIN tasks t ON utc.task_id = t.id
+		WHERE utc.points_earned = 0 
+		AND t.task_type = 'twitter_retweet'
+		ORDER BY utc.completed_at ASC
+		LIMIT 50
+	`
+
+	rows, err := rc.taskService.GetDB().QueryContext(context.Background(), query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query completed tasks: %v", err)
+	}
+	defer rows.Close()
+
+	var tasks []*models.Task
+	for rows.Next() {
+		var task models.Task
+		var payloadJSON, proofJSON []byte
+		var completedAt, eventID, vlcClock, subnetID, expiresAt, userCompletedAt sql.NullString
+		var completingUserWallet string
+
+		err := rows.Scan(
+			&completingUserWallet, &task.ID, &task.TaskType, &task.Status,
+			&payloadJSON, &proofJSON, &task.Attempts,
+			&task.CreatedAt, &task.UpdatedAt, &completedAt, &eventID, &vlcClock, &subnetID, &expiresAt,
+			&userCompletedAt,
+		)
+		if err != nil {
+			log.Printf("Error scanning task row: %v", err)
+			continue
+		}
+
+		// Set the UserWallet to the completing user (not the task creator)
+		task.UserWallet = completingUserWallet
+
+		// Parse JSON fields
+		if err := json.Unmarshal(payloadJSON, &task.Payload); err != nil {
+			log.Printf("Error parsing task payload: %v", err)
+			continue
+		}
+
+		if len(proofJSON) > 0 {
+			if err := json.Unmarshal(proofJSON, &task.Proof); err != nil {
+				log.Printf("Error parsing task proof: %v", err)
+			}
+		}
+
+		// Process optional fields
+		if completedAt.Valid {
+			if t, err := time.Parse("2006-01-02 15:04:05", completedAt.String); err == nil {
+				task.CompletedAt = &t
+			}
+		}
+
+		if eventID.Valid {
+			task.EventID = eventID.String
+		}
+
+		if subnetID.Valid {
+			task.SubnetID = subnetID.String
+		}
+
+		if expiresAt.Valid {
+			if t, err := time.Parse("2006-01-02 15:04:05", expiresAt.String); err == nil {
+				task.ExpiresAt = &t
+			}
+		}
+
+		if vlcClock.Valid && len(vlcClock.String) > 0 {
+			if err := json.Unmarshal([]byte(vlcClock.String), &task.VLCClock); err != nil {
+				log.Printf("Error parsing VLC clock: %v", err)
+			}
+		}
+
+		tasks = append(tasks, &task)
+	}
+
+	if len(tasks) > 0 {
+		log.Printf("Found %d completed tasks awaiting points distribution", len(tasks))
+	}
+
+	return tasks, nil
 }
 
 // taskProcessingPhase handles the task processing phase
@@ -711,6 +813,18 @@ func (rc *RoundCoordinator) distributeIndividualTaskPoints(task *models.Task) {
 		log.Printf("Failed to distribute points for task %s: %v", task.ID, err)
 	} else {
 		log.Printf("✅ Points distributed successfully for task %s", task.ID)
+
+		// Update user_task_completions to mark points as distributed for this specific user
+		updateQuery := `
+			UPDATE user_task_completions 
+			SET points_earned = 1 
+			WHERE task_id = ? AND user_wallet = ? AND points_earned = 0
+		`
+		if _, err := rc.taskService.GetDB().ExecContext(ctx, updateQuery, task.ID, task.UserWallet); err != nil {
+			log.Printf("Failed to update task completion points for user %s, task %s: %v", task.UserWallet, task.ID, err)
+		} else {
+			log.Printf("Updated task completion record for user %s, task %s", task.UserWallet, task.ID)
+		}
 	}
 }
 
