@@ -545,7 +545,7 @@ func (ts *TaskService) GetUserTasks(ctx context.Context, userWallet string, page
 	// Query task list
 	query := `
 		SELECT id, user_wallet, task_type, status, payload, proof, attempts, 
-		       created_at, updated_at, completed_at, event_id, vlc_clock
+		       created_at, updated_at, completed_at, event_id, vlc_clock, subnet_id, expires_at
 		FROM tasks 
 		WHERE user_wallet = ? 
 		ORDER BY created_at DESC 
@@ -562,12 +562,12 @@ func (ts *TaskService) GetUserTasks(ctx context.Context, userWallet string, page
 	for rows.Next() {
 		var task models.Task
 		var payloadJSON, proofJSON []byte
-		var completedAt, eventID, vlcClock sql.NullString
+		var completedAt, eventID, vlcClock, subnetID, expiresAt sql.NullString
 
 		err := rows.Scan(
 			&task.ID, &task.UserWallet, &task.TaskType, &task.Status,
 			&payloadJSON, &proofJSON, &task.Attempts,
-			&task.CreatedAt, &task.UpdatedAt, &completedAt, &eventID, &vlcClock,
+			&task.CreatedAt, &task.UpdatedAt, &completedAt, &eventID, &vlcClock, &subnetID, &expiresAt,
 		)
 		if err != nil {
 			continue // Skip failed records

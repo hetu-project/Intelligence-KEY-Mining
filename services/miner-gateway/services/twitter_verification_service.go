@@ -306,11 +306,11 @@ func (tvs *TwitterVerificationService) callRetweetCheckAPISingle(ctx context.Con
 	startTime, endTime := tvs.calculateTimeWindow(task)
 
 	req := TwitterRetweetCheckRequest{
-		MediaAccount: twitterUsername, // 推文创建者的推特账号
-		XID:          userTwitterID,   // 要验证的用户的推特ID
-		PostID:       tweetID,         // 推文ID
-		StartTime:    startTime,       // 开始时间
-		EndTime:      endTime,         // 结束时间
+		MediaAccount: twitterUsername,
+		XID:          userTwitterID,
+		PostID:       tweetID,
+		StartTime:    startTime,
+		EndTime:      endTime,
 	}
 
 	reqBody, err := json.Marshal(req)
