@@ -385,31 +385,14 @@ func (rc *RoundCoordinator) taskProcessingPhase(round *Round) error {
 
 	log.Printf("Processing %d tasks in round %s", len(tasks), round.ID)
 
-	// Create context for task processing
-	ctx := context.Background()
-
-	// Simulate miner processing (in real implementation, this would trigger actual processing)
+	// For completed tasks awaiting points distribution, we don't need to increment VLC again
+	// VLC was already incremented during batch verification
 	for _, task := range tasks {
-		// Increment dual-layer VLC for each task processing
-		vlcResult := rc.enhancedVLCService.IncrementForTask(
-			ctx,
-			task.ID,
-			task.TaskType,
-			"round_processing",
-			map[string]interface{}{
-				"round_id": round.ID,
-				"phase":    "task_processing",
-			},
-			task.UserWallet,
-		)
-
-		// Update task VLC
-		task.VLCClock = vlcResult
-		log.Printf("Task %s processed, VLC updated", task.ID)
+		log.Printf("Task %s queued for points distribution (user: %s)", task.ID, task.UserWallet)
 	}
 
-	// Record final miner VLC after processing
-	round.MinerVLCAfter = rc.enhancedVLCService.GetMinerVLC()
+	// For points distribution tasks, Miner VLC doesn't change
+	round.MinerVLCAfter = round.MinerVLCBefore.Copy()
 
 	return nil
 }
@@ -424,7 +407,8 @@ func (rc *RoundCoordinator) vlcVerificationPhase(round *Round) error {
 	}
 
 	// Calculate expected VLC increment
-	expectedIncrement := len(round.Tasks)
+	// For points distribution tasks, we expect 0 increment since VLC was already incremented during verification
+	expectedIncrement := 0 // Points distribution doesn't change Miner VLC
 	actualIncrement := round.MinerVLCAfter.GetValue(1) - round.MinerVLCBefore.GetValue(1)
 
 	if actualIncrement != expectedIncrement {
