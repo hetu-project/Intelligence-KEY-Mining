@@ -185,6 +185,7 @@ func (bv *BatchVerifier) processTask(ctx context.Context, task *models.Task, wor
 
 			// Task remains PENDING_VERIFICATION regardless of individual user results
 			// This allows future users to complete the task and allows re-verification
+			bv.taskService.updateTaskStatus(ctx, task.ID, "PENDING_VERIFICATION")
 		} else {
 			log.Printf("Worker %d: Twitter verification service not available, marking task %s as incomplete", workerID, task.ID)
 			bv.handleTwitterTaskAsIncomplete(ctx, task, fmt.Errorf("twitter verification service not configured"))
