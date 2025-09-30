@@ -373,13 +373,8 @@ func (rc *RoundCoordinator) getCompletedTasksForConsensus() ([]*models.Task, err
 func (rc *RoundCoordinator) taskProcessingPhase(round *Round) error {
 	round.Phase = RoundPhaseTaskProcess
 
-	// Get pending tasks for processing
-	// For now, simulate getting verified Twitter tasks that need final processing
-	ctx := context.Background()
-	tasks, err := rc.getTasksForRound(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get tasks for round: %v", err)
-	}
+	// Use tasks already loaded in round.Tasks (from getCompletedTasksForConsensus)
+	tasks := round.Tasks
 
 	if len(tasks) == 0 {
 		log.Printf("No tasks to process in round %s", round.ID)
@@ -388,8 +383,10 @@ func (rc *RoundCoordinator) taskProcessingPhase(round *Round) error {
 		return nil
 	}
 
-	round.Tasks = tasks
 	log.Printf("Processing %d tasks in round %s", len(tasks), round.ID)
+
+	// Create context for task processing
+	ctx := context.Background()
 
 	// Simulate miner processing (in real implementation, this would trigger actual processing)
 	for _, task := range tasks {
