@@ -394,7 +394,7 @@ func (ts *TaskService) GetTask(ctx context.Context, taskID string) (*models.Task
 func (ts *TaskService) GetUserTasksByType(ctx context.Context, userWallet string, taskType models.TaskType, limit, offset int) ([]*models.Task, error) {
 	query := `
 		SELECT id, user_wallet, task_type, status, payload, proof, attempts, 
-		       created_at, updated_at, completed_at, event_id, vlc_clock
+		       created_at, updated_at, completed_at, event_id, vlc_clock, subnet_id, expires_at
 		FROM tasks 
 		WHERE user_wallet = ? AND task_type = ?
 		ORDER BY created_at DESC
@@ -412,12 +412,12 @@ func (ts *TaskService) GetUserTasksByType(ctx context.Context, userWallet string
 	for rows.Next() {
 		var task models.Task
 		var payloadJSON, proofJSON []byte
-		var completedAt, eventID, vlcClock sql.NullString
+		var completedAt, eventID, vlcClock, subnetID, expiresAt sql.NullString
 
 		err := rows.Scan(
 			&task.ID, &task.UserWallet, &task.TaskType, &task.Status,
 			&payloadJSON, &proofJSON, &task.Attempts,
-			&task.CreatedAt, &task.UpdatedAt, &completedAt, &eventID, &vlcClock,
+			&task.CreatedAt, &task.UpdatedAt, &completedAt, &eventID, &vlcClock, &subnetID, &expiresAt,
 		)
 
 		if err != nil {
@@ -450,6 +450,16 @@ func (ts *TaskService) GetUserTasksByType(ctx context.Context, userWallet string
 
 		if eventID.Valid {
 			task.EventID = eventID.String
+		}
+
+		if subnetID.Valid {
+			task.SubnetID = subnetID.String
+		}
+
+		if expiresAt.Valid {
+			if t, err := time.Parse("2006-01-02 15:04:05", expiresAt.String); err == nil {
+				task.ExpiresAt = &t
+			}
 		}
 
 		tasks = append(tasks, &task)
@@ -591,6 +601,16 @@ func (ts *TaskService) GetUserTasks(ctx context.Context, userWallet string, page
 			task.EventID = eventID.String
 		}
 
+		if subnetID.Valid {
+			task.SubnetID = subnetID.String
+		}
+
+		if expiresAt.Valid {
+			if t, err := time.Parse("2006-01-02 15:04:05", expiresAt.String); err == nil {
+				task.ExpiresAt = &t
+			}
+		}
+
 		tasks = append(tasks, &task)
 	}
 
@@ -601,7 +621,7 @@ func (ts *TaskService) GetUserTasks(ctx context.Context, userWallet string, page
 func (ts *TaskService) GetTasksByTypeAndStatus(ctx context.Context, taskType, status string, limit int) ([]*models.Task, error) {
 	query := `
 		SELECT id, user_wallet, task_type, status, payload, proof, attempts, 
-		       created_at, updated_at, completed_at, event_id, vlc_clock
+		       created_at, updated_at, completed_at, event_id, vlc_clock, subnet_id, expires_at
 		FROM tasks 
 		WHERE task_type = ? AND status = ?
 		ORDER BY created_at ASC 
@@ -618,12 +638,12 @@ func (ts *TaskService) GetTasksByTypeAndStatus(ctx context.Context, taskType, st
 	for rows.Next() {
 		var task models.Task
 		var payloadJSON, proofJSON []byte
-		var completedAt, eventID, vlcClock sql.NullString
+		var completedAt, eventID, vlcClock, subnetID, expiresAt sql.NullString
 
 		err := rows.Scan(
 			&task.ID, &task.UserWallet, &task.TaskType, &task.Status,
 			&payloadJSON, &proofJSON, &task.Attempts,
-			&task.CreatedAt, &task.UpdatedAt, &completedAt, &eventID, &vlcClock,
+			&task.CreatedAt, &task.UpdatedAt, &completedAt, &eventID, &vlcClock, &subnetID, &expiresAt,
 		)
 		if err != nil {
 			continue // Skip failed records
@@ -655,6 +675,16 @@ func (ts *TaskService) GetTasksByTypeAndStatus(ctx context.Context, taskType, st
 
 		if eventID.Valid {
 			task.EventID = eventID.String
+		}
+
+		if subnetID.Valid {
+			task.SubnetID = subnetID.String
+		}
+
+		if expiresAt.Valid {
+			if t, err := time.Parse("2006-01-02 15:04:05", expiresAt.String); err == nil {
+				task.ExpiresAt = &t
+			}
 		}
 
 		tasks = append(tasks, &task)
