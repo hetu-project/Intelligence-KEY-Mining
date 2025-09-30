@@ -85,10 +85,21 @@ func (ms *MetadataService) GenerateSBT(ctx context.Context, req *models.UserRegi
 
 	tokenURI := FormatIPFSURI(metadataResp.IpfsHash)
 
+	// Extract Twitter ID from initial attributes
+	var twitterID string
+	if req.InitialAttrs != nil {
+		if twitterIDValue, exists := req.InitialAttrs["twitter_id"]; exists {
+			if twitterIDStr, ok := twitterIDValue.(string); ok {
+				twitterID = twitterIDStr
+			}
+		}
+	}
+
 	// 5. Save user profile to database
 	profile := &models.UserProfile{
 		WalletAddress:     req.WalletAddress,
 		DisplayName:       req.DisplayName,
+		TwitterID:         twitterID,
 		RegistrationDate:  time.Now(),
 		Inviter:           req.InviteFrom,
 		TotalPoints:       0,
@@ -315,14 +326,14 @@ func (ms *MetadataService) userExists(ctx context.Context, walletAddress string)
 func (ms *MetadataService) saveUserProfile(ctx context.Context, profile *models.UserProfile) error {
 	query := `
 		INSERT INTO user_profiles (
-			wallet_address, display_name, registration_date, inviter,
+			wallet_address, display_name, twitter_id, registration_date, inviter,
 			total_points, today_contribution, token_uri, image_uri, ipfs_hash,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	_, err := ms.db.ExecContext(ctx, query,
-		profile.WalletAddress, profile.DisplayName, profile.RegistrationDate, profile.Inviter,
+		profile.WalletAddress, profile.DisplayName, profile.TwitterID, profile.RegistrationDate, profile.Inviter,
 		profile.TotalPoints, profile.TodayContribution, profile.TokenURI, profile.ImageURI, profile.IPFSHash,
 		profile.CreatedAt, profile.UpdatedAt,
 	)

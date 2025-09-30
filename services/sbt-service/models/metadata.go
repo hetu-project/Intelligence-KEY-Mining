@@ -85,6 +85,7 @@ type UserProfile struct {
 	// Basic information (static)
 	WalletAddress    string    `json:"wallet_address" db:"wallet_address"`
 	DisplayName      string    `json:"display_name" db:"display_name"`
+	TwitterID        string    `json:"twitter_id,omitempty" db:"twitter_id"`
 	RegistrationDate time.Time `json:"registration_date" db:"registration_date"`
 
 	// Invitation information
