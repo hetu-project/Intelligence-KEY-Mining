@@ -13,19 +13,21 @@ import (
 
 // PointsService points service
 type PointsService struct {
-	db     *sql.DB
-	config *models.PointsConfig
+	db         *sql.DB
+	config     *models.PointsConfig
+	nftService *NFTService
 }
 
 // NewPointsService creates points service
-func NewPointsService(db *sql.DB, config *models.PointsConfig) *PointsService {
+func NewPointsService(db *sql.DB, config *models.PointsConfig, nftService *NFTService) *PointsService {
 	if config == nil {
 		config = models.DefaultPointsConfig()
 	}
 
 	return &PointsService{
-		db:     db,
-		config: config,
+		db:         db,
+		config:     config,
+		nftService: nftService,
 	}
 }
 
@@ -166,6 +168,19 @@ func (ps *PointsService) updateUserPointsInSBT(ctx context.Context, userResult *
 		return nil // No points to update
 	}
 
+	// Check if user has NFT for bonus calculation
+	finalPoints := userResult.RoundedPoints
+	if ps.nftService != nil {
+		hasNFT, err := ps.nftService.CheckUserNFTOwnership(ctx, userResult.UserWallet)
+		if err != nil {
+			log.Printf("Warning: Failed to check NFT ownership for user %s: %v", userResult.UserWallet, err)
+			// Continue with original points if NFT check fails
+		} else if hasNFT {
+			finalPoints = userResult.RoundedPoints * 2 // Double points for NFT holders
+			log.Printf("🎯 NFT bonus applied for user %s: %d → %d points", userResult.UserWallet, userResult.RoundedPoints, finalPoints)
+		}
+	}
+
 	// Begin transaction
 	tx, err := ps.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -173,19 +188,10 @@ func (ps *PointsService) updateUserPointsInSBT(ctx context.Context, userResult *
 	}
 	defer tx.Rollback()
 
-	// 1. Update user total points
-	updateQuery := `
-		UPDATE user_profiles 
-		SET total_points = total_points + ?, 
-		    updated_at = ?
-		WHERE wallet_address = ?
-	`
-	_, err = tx.ExecContext(ctx, updateQuery, userResult.RoundedPoints, time.Now(), userResult.UserWallet)
-	if err != nil {
-		return fmt.Errorf("failed to update user total points: %w", err)
-	}
+	// 1. total_points will be updated automatically by database trigger
+	// No manual update needed - the trigger handles this after INSERT to points_history
 
-	// 2. Record points history
+	// 2. Record points history (with NFT bonus applied)
 	historyQuery := `
 		INSERT INTO points_history (wallet_address, date, source, points, tx_ref, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)
@@ -194,7 +200,7 @@ func (ps *PointsService) updateUserPointsInSBT(ctx context.Context, userResult *
 	source := "VLC Distribution"
 
 	_, err = tx.ExecContext(ctx, historyQuery,
-		userResult.UserWallet, today, source, userResult.RoundedPoints, batchID, time.Now())
+		userResult.UserWallet, today, source, finalPoints, batchID, time.Now())
 	if err != nil {
 		return fmt.Errorf("failed to insert points history: %w", err)
 	}
@@ -203,6 +209,10 @@ func (ps *PointsService) updateUserPointsInSBT(ctx context.Context, userResult *
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
+
+	log.Printf("Successfully distributed %d points to user %s (original: %d, NFT bonus: %s)",
+		finalPoints, userResult.UserWallet, userResult.RoundedPoints,
+		map[bool]string{true: "applied", false: "none"}[finalPoints > userResult.RoundedPoints])
 
 	return nil
 }
@@ -330,13 +340,8 @@ func (ps *PointsService) AddDirectPoints(ctx context.Context, req *models.Direct
 		return fmt.Errorf("failed to add points record: %v", err)
 	}
 
-	// 3. Update user's total points in user_profiles table
-	updateQuery := `UPDATE user_profiles SET total_points = total_points + ? WHERE wallet_address = ?`
-	_, err := ps.db.ExecContext(ctx, updateQuery, req.Points, req.UserWallet)
-	if err != nil {
-		log.Printf("Warning: Failed to update total_points for user %s: %v", req.UserWallet, err)
-		// Don't return error, as the points record was already added successfully
-	}
+	// 3. total_points will be updated automatically by database trigger
+	// No manual update needed - the trigger handles this after INSERT to points_history
 
 	log.Printf("Successfully added %d points to user %s", req.Points, req.UserWallet)
 	return nil

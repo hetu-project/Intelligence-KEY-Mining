@@ -248,37 +248,17 @@ func (vs *ValidatorScheduler) processTaskCreationTasks(ctx context.Context, task
 				// TaskCreation verification passed: direct VLC++, task completed
 				log.Printf("TaskCreation %s validated successfully - completing task", task.ID)
 
-				// Create simple proof
-				proof := map[string]interface{}{
-					"validation_type": "task_creation",
-					"validated_at":    time.Now(),
-					"status":          "completed",
-					"message":         "Task creation action completed successfully",
-				}
-				proofJSON, _ := json.Marshal(proof)
-
-				// Update to VERIFIED status (TaskCreation tasks can be VERIFIED as they're just creation actions)
-				if err := vs.taskService.updateTaskStatusWithProof(ctx, task.ID, "VERIFIED", proofJSON); err != nil {
-					log.Printf("Error updating TaskCreation status %s: %v", task.ID, err)
-				} else {
-					log.Printf("✅ TaskCreation %s completed successfully", task.ID)
-					// NOTE: TaskCreation points will be distributed during daily 0-point distribution
-					// as 5% commission to subnet creators
-				}
+				// Keep task status as PENDING_VERIFICATION - no status change needed
+				// TaskCreation tasks remain available for future processing
+				log.Printf("✅ TaskCreation %s completed successfully", task.ID)
+				// NOTE: TaskCreation points will be distributed during daily 0-point distribution
+				// as 5% commission to subnet creators
 			} else {
 				// Validation failed
 				log.Printf("TaskCreation %s validation failed - invalid payload", task.ID)
-				proof := map[string]interface{}{
-					"validation_type": "task_creation",
-					"validated_at":    time.Now(),
-					"status":          "failed",
-					"message":         "Invalid task creation payload",
-				}
-				proofJSON, _ := json.Marshal(proof)
-
-				if err := vs.taskService.updateTaskStatusWithProof(ctx, task.ID, "FAILED", proofJSON); err != nil {
-					log.Printf("Error updating TaskCreation status %s: %v", task.ID, err)
-				}
+				// Keep task status as PENDING_VERIFICATION even for failed validation
+				// Task can be retried in future batch verifications
+				log.Printf("TaskCreation %s validation failed but status unchanged", task.ID)
 			}
 		}
 	}

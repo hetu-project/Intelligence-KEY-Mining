@@ -156,20 +156,35 @@ func (bv *BatchVerifier) processTask(ctx context.Context, task *models.Task, wor
 
 	if task.TaskType == models.TwitterRetweetTask {
 		if bv.twitterVerificationSvc != nil {
-			result, err := bv.twitterVerificationSvc.VerifyTwitterRetweetTask(ctx, task)
+			results, err := bv.twitterVerificationSvc.VerifyTwitterRetweetTask(ctx, task)
 			if err != nil {
 				log.Printf("Unexpected error in Twitter verification: %v", err)
 				bv.handleTwitterTaskAsIncomplete(ctx, task, fmt.Errorf("verification service error: %v", err))
 				return
 			}
 
-			if result.Verified {
-				log.Printf("Worker %d: Task %s verified successfully", workerID, task.ID)
-				bv.handleVerificationSuccess(ctx, task, result)
-			} else {
-				log.Printf("Worker %d: Task %s not verified: %v", workerID, task.ID, result.Error)
-				bv.handleTwitterTaskAsIncomplete(ctx, task, result.Error)
+			log.Printf("Worker %d: Task %s verification completed for %d users", workerID, task.ID, len(results))
+
+			// Process results for each user
+			verifiedCount := 0
+			for _, result := range results {
+				if result.Verified {
+					log.Printf("Worker %d: User %s verified task %s successfully", workerID, result.UserWallet, task.ID)
+					bv.handleUserVerificationSuccess(ctx, task, result)
+					verifiedCount++
+				} else if result.Error != nil {
+					log.Printf("Worker %d: User %s verification error for task %s: %v", workerID, result.UserWallet, task.ID, result.Error)
+					// Don't mark task as incomplete for individual user errors
+				} else {
+					log.Printf("Worker %d: User %s has not completed task %s", workerID, result.UserWallet, task.ID)
+					// User hasn't retweeted - this is normal, not an error
+				}
 			}
+
+			log.Printf("Worker %d: Task %s processed - %d users verified out of %d checked", workerID, task.ID, verifiedCount, len(results))
+
+			// Task remains PENDING_VERIFICATION regardless of individual user results
+			// This allows future users to complete the task and allows re-verification
 		} else {
 			log.Printf("Worker %d: Twitter verification service not available, marking task %s as incomplete", workerID, task.ID)
 			bv.handleTwitterTaskAsIncomplete(ctx, task, fmt.Errorf("twitter verification service not configured"))
@@ -225,13 +240,9 @@ func (bv *BatchVerifier) processTaskLegacy(ctx context.Context, task *models.Tas
 		ProcessedAt:     time.Now(),
 	}
 
-	resultJSON, _ := json.Marshal(result)
-
-	// Update task status to verified
-	if err := bv.taskService.updateTaskStatusWithProof(ctx, task.ID, "VERIFIED", resultJSON); err != nil {
-		bv.handleError(ctx, task.ID, fmt.Errorf("failed to update task status: %w", err))
-		return
-	}
+	// Keep task status as PENDING_VERIFICATION - no status change needed
+	// Task remains available for future batch verifications
+	// Status update removed to allow continuous verification
 
 	// Trigger VLC increment
 	if result.VLCIncrement > 0 {
@@ -426,17 +437,16 @@ func (bv *BatchVerifier) determineTaskType(tweetID string) string {
 	return "retweet" // Default to retweet tasks
 }
 
-// handleVerificationSuccess handles successful Twitter verification
-func (bv *BatchVerifier) handleVerificationSuccess(ctx context.Context, task *models.Task, result *TwitterVerificationResult) {
-	// 1. Check if user has already completed this task
+// handleUserVerificationSuccess handles successful Twitter verification for a specific user
+func (bv *BatchVerifier) handleUserVerificationSuccess(ctx context.Context, task *models.Task, result *TwitterVerificationResult) {
+	// 1. Check if user has already completed this task (should be already checked, but double-check)
 	if bv.subnetService != nil {
-		alreadyCompleted, err := bv.subnetService.CheckTaskCompletion(ctx, task.UserWallet, task.ID)
+		alreadyCompleted, err := bv.subnetService.CheckTaskCompletion(ctx, result.UserWallet, task.ID)
 		if err != nil {
-			log.Printf("Failed to check task completion for user %s, task %s: %v", task.UserWallet, task.ID, err)
+			log.Printf("Failed to check task completion for user %s, task %s: %v", result.UserWallet, task.ID, err)
 		} else if alreadyCompleted {
-			log.Printf("User %s has already completed task %s, skipping VLC increment and points", task.UserWallet, task.ID)
-			bv.trackTaskCompletion(task.ID, false) // Mark as processed but not rewarded
-			return
+			log.Printf("User %s has already completed task %s, skipping VLC increment and points", result.UserWallet, task.ID)
+			return // Don't track this as it's already completed
 		}
 	}
 
@@ -456,21 +466,22 @@ func (bv *BatchVerifier) handleVerificationSuccess(ctx context.Context, task *mo
 		return
 	}
 
-	// 3. Increment VLC for verified Twitter task (only if not duplicate)
+	// 3. Increment VLC for verified Twitter task for the specific user
 	if bv.vlcService != nil {
 		vlcPayload := map[string]interface{}{
 			"verification_type": "twitter_retweet_check",
 			"tweet_id":          result.TweetID,
 			"verified":          true,
+			"user_wallet":       result.UserWallet,
 		}
-		bv.vlcService.IncrementForTask(ctx, task.ID, models.TwitterRetweetTask, "verification", vlcPayload, task.UserWallet)
-		log.Printf("VLC incremented for user %s completing Twitter task %s", task.UserWallet, task.ID)
+		bv.vlcService.IncrementForTask(ctx, task.ID, models.TwitterRetweetTask, "verification", vlcPayload, result.UserWallet)
+		log.Printf("VLC incremented for user %s completing Twitter task %s", result.UserWallet, task.ID)
 	}
 
-	// 4. Record task completion to prevent future duplicates
+	// 4. Record task completion to prevent future duplicates for this specific user
 	if bv.subnetService != nil {
 		completion := &models.UserTaskCompletion{
-			UserWallet:   task.UserWallet,
+			UserWallet:   result.UserWallet, // Use the user who actually completed the task
 			TaskID:       task.ID,
 			SubnetID:     task.SubnetID,
 			CompletedAt:  time.Now(),
@@ -479,50 +490,48 @@ func (bv *BatchVerifier) handleVerificationSuccess(ctx context.Context, task *mo
 		}
 
 		if err := bv.subnetService.RecordTaskCompletion(ctx, completion); err != nil {
-			log.Printf("Failed to record task completion for user %s, task %s: %v", task.UserWallet, task.ID, err)
+			log.Printf("Failed to record task completion for user %s, task %s: %v", result.UserWallet, task.ID, err)
 		}
 	}
 
 	// NOTE: Points distribution moved to PoCW consensus completion
 	// No immediate points distribution for Twitter tasks - wait for PoCW consensus
-	log.Printf("Twitter task %s verified successfully, awaiting PoCW consensus for points distribution", task.ID)
+	log.Printf("User %s completed Twitter task %s, awaiting PoCW consensus for points distribution", result.UserWallet, task.ID)
 
-	// Track task completion in current batch round
-	bv.trackTaskCompletion(task.ID, true)
+	// Note: We don't track task completion in batch round since multiple users can complete the same task
+	// Each user completion is independent
 }
 
-// handleTwitterTaskAsIncomplete
+// handleTwitterTaskAsIncomplete handles Twitter task verification failure
 func (bv *BatchVerifier) handleTwitterTaskAsIncomplete(ctx context.Context, task *models.Task, reason error) {
 	var reasonStr string
 	if reason != nil {
 		reasonStr = reason.Error()
 	} else {
-		reasonStr = "unknown reason"
+		reasonStr = "user has not retweeted"
 	}
 
+	// Record verification failure but keep task available for future verification
 	proofData := map[string]interface{}{
 		"verification_status": "incomplete",
 		"reason":              reasonStr,
 		"timestamp":           time.Now(),
-		"retry_available":     task.Attempts < 3,
 		"verification_type":   "twitter_retweet_check",
+		"note":                "Task remains PENDING_VERIFICATION for future attempts",
 	}
 
 	proofJSON, _ := json.Marshal(proofData)
 
-	status := models.TaskPendingVerification
-	if task.Attempts >= 3 {
-		status = models.TaskPendingReview
-		log.Printf("Task %s moved to PENDING_REVIEW after %d attempts", task.ID, task.Attempts)
+	// Always keep status as PENDING_VERIFICATION - no status change
+	// This allows the task to be verified again in future batch runs
+	// when the user completes the retweet
+	if err := bv.taskService.updateTaskStatusWithProof(ctx, task.ID, models.TaskPendingVerification, proofJSON); err != nil {
+		log.Printf("Failed to update task proof for %s: %v", task.ID, err)
 	}
 
-	if err := bv.taskService.updateTaskStatusWithProof(ctx, task.ID, status, proofJSON); err != nil {
-		log.Printf("Failed to update task status for %s: %v", task.ID, err)
-	}
+	log.Printf("Task %s verification incomplete: %s (task remains PENDING_VERIFICATION)", task.ID, reasonStr)
 
-	log.Printf("Task %s marked as incomplete due to: %v", task.ID, reasonStr)
-
-	// Track task completion in current batch round
+	// Track task completion in current batch round as not completed
 	bv.trackTaskCompletion(task.ID, false)
 }
 

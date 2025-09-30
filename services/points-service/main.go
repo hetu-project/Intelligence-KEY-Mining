@@ -29,9 +29,9 @@ func main() {
 	}
 
 	// Initialize services
-	pointsService := services.NewPointsService(db, config)
-	statsService := services.NewStatsService(db)
 	nftService := services.NewNFTService(db)
+	pointsService := services.NewPointsService(db, config, nftService)
+	statsService := services.NewStatsService(db)
 
 	// Initialize handlers
 	pointsHandler := handlers.NewPointsHandler(pointsService)

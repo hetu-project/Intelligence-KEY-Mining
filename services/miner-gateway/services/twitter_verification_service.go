@@ -74,39 +74,79 @@ func NewTwitterVerificationService(retweetCheckURL string, db *sql.DB) *TwitterV
 	}
 }
 
-// VerifyTwitterRetweetTask verifies a single Twitter retweet task with full fault tolerance
-func (tvs *TwitterVerificationService) VerifyTwitterRetweetTask(ctx context.Context, task *models.Task) (*TwitterVerificationResult, error) {
-	result := &TwitterVerificationResult{
-		TaskID:     task.ID,
-		UserWallet: task.UserWallet,
-		Verified:   false,
-		Error:      nil,
-	}
-
+// VerifyTwitterRetweetTask verifies a single Twitter retweet task for ALL registered users
+func (tvs *TwitterVerificationService) VerifyTwitterRetweetTask(ctx context.Context, task *models.Task) ([]*TwitterVerificationResult, error) {
 	tweetID, twitterUsername, err := tvs.extractTaskInfo(task)
 	if err != nil {
-		result.TweetID = tweetID
-		result.Error = fmt.Errorf("task info extraction failed: %v", err)
-		return result, nil
-	}
-	result.TweetID = tweetID
-
-	userTwitterID, err := tvs.getUserTwitterID(ctx, task.UserWallet)
-	if err != nil {
-		result.Error = fmt.Errorf("user twitter ID not found: %v", err)
-		return result, nil
+		return nil, fmt.Errorf("task info extraction failed: %v", err)
 	}
 
-	verified, apiResponse, err := tvs.callRetweetCheckAPIWithRetry(ctx, tweetID, twitterUsername, userTwitterID, task)
+	// Get all registered users
+	users, err := tvs.getAllRegisteredUsers(ctx)
 	if err != nil {
-		result.Error = fmt.Errorf("API call failed: %v", err)
+		return nil, fmt.Errorf("failed to get registered users: %v", err)
+	}
+
+	log.Printf("Verifying task %s (tweet: %s) for %d registered users", task.ID, tweetID, len(users))
+
+	results := make([]*TwitterVerificationResult, 0, len(users))
+
+	// Verify each user's retweet status for this task
+	for _, userWallet := range users {
+		result := &TwitterVerificationResult{
+			TaskID:     task.ID,
+			UserWallet: userWallet,
+			TweetID:    tweetID,
+			Verified:   false,
+			Error:      nil,
+		}
+
+		// Skip verification if user has already completed this task
+		alreadyCompleted, err := tvs.checkUserTaskCompletion(ctx, userWallet, task.ID)
+		if err != nil {
+			log.Printf("Failed to check task completion for user %s, task %s: %v", userWallet, task.ID, err)
+			result.Error = fmt.Errorf("failed to check completion status: %v", err)
+			results = append(results, result)
+			continue
+		}
+
+		if alreadyCompleted {
+			log.Printf("User %s has already completed task %s, skipping verification", userWallet, task.ID)
+			continue // Skip users who have already completed this task
+		}
+
+		// Get user's Twitter ID
+		userTwitterID, err := tvs.getUserTwitterID(ctx, userWallet)
+		if err != nil {
+			log.Printf("User %s Twitter ID not found: %v", userWallet, err)
+			result.Error = fmt.Errorf("user twitter ID not found: %v", err)
+			results = append(results, result)
+			continue
+		}
+
+		// Verify if this user retweeted the task's tweet
+		verified, apiResponse, err := tvs.callRetweetCheckAPIWithRetry(ctx, tweetID, twitterUsername, userTwitterID, task)
+		if err != nil {
+			log.Printf("API call failed for user %s, task %s: %v", userWallet, task.ID, err)
+			result.Error = fmt.Errorf("API call failed: %v", err)
+			result.APIResponse = apiResponse
+			results = append(results, result)
+			continue
+		}
+
+		result.Verified = verified
 		result.APIResponse = apiResponse
-		return result, nil
+		results = append(results, result)
+
+		if verified {
+			log.Printf("✅ User %s has retweeted tweet %s (task %s)", userWallet, tweetID, task.ID)
+		} else {
+			log.Printf("❌ User %s has not retweeted tweet %s (task %s)", userWallet, tweetID, task.ID)
+		}
 	}
 
-	result.Verified = verified
-	result.APIResponse = apiResponse
-	return result, nil
+	log.Printf("Task %s verification completed: %d results for %d users", task.ID, len(results), len(users))
+	return results, nil
 }
 
 // extractTaskInfo
@@ -215,17 +255,12 @@ func (tvs *TwitterVerificationService) processBatch(ctx context.Context, tasks [
 				}
 			}
 
-			// Verify the task
-			result, err := tvs.VerifyTwitterRetweetTask(ctx, t)
-			if err != nil {
-				results[index] = TwitterVerificationResult{
-					TaskID:     t.ID,
-					UserWallet: t.UserWallet,
-					Verified:   false,
-					Error:      err,
-				}
-			} else {
-				results[index] = *result
+			// Note: This method is deprecated - just create a placeholder result
+			results[index] = TwitterVerificationResult{
+				TaskID:     t.ID,
+				UserWallet: t.UserWallet,
+				Verified:   false,
+				Error:      fmt.Errorf("BatchVerifyTwitterTasks is deprecated - use VerifyTwitterRetweetTask directly"),
 			}
 		}(i, task)
 	}
@@ -317,6 +352,43 @@ func (tvs *TwitterVerificationService) callRetweetCheckAPI(ctx context.Context, 
 	}
 
 	return tvs.callRetweetCheckAPIWithRetry(ctx, req.PostID, req.MediaAccount, req.XID, task)
+}
+
+// getAllRegisteredUsers gets all registered users from the database
+func (tvs *TwitterVerificationService) getAllRegisteredUsers(ctx context.Context) ([]string, error) {
+	query := "SELECT wallet_address FROM user_profiles"
+	rows, err := tvs.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query users: %v", err)
+	}
+	defer rows.Close()
+
+	var users []string
+	for rows.Next() {
+		var wallet string
+		if err := rows.Scan(&wallet); err != nil {
+			log.Printf("Failed to scan user wallet: %v", err)
+			continue
+		}
+		users = append(users, wallet)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration error: %v", err)
+	}
+
+	return users, nil
+}
+
+// checkUserTaskCompletion checks if a user has already completed a specific task
+func (tvs *TwitterVerificationService) checkUserTaskCompletion(ctx context.Context, userWallet, taskID string) (bool, error) {
+	query := "SELECT COUNT(*) FROM user_task_completions WHERE user_wallet = ? AND task_id = ?"
+	var count int
+	err := tvs.db.QueryRowContext(ctx, query, userWallet, taskID).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("failed to check task completion: %v", err)
+	}
+	return count > 0, nil
 }
 
 // getUserTwitterID gets the user's Twitter ID from the database

@@ -71,7 +71,7 @@ func (ts *TaskService) SubmitTask(ctx context.Context, req *models.TaskSubmitReq
 		ID:         uuid.New().String(),
 		UserWallet: req.UserWallet,
 		TaskType:   models.TaskType(req.TaskType),
-		Status:     models.TaskSubmitted,
+		Status:     models.TaskPendingVerification, // Direct to PENDING_VERIFICATION
 		Payload:    req.Payload,
 		Attempts:   0,
 		CreatedAt:  time.Now(),
@@ -92,8 +92,8 @@ func (ts *TaskService) SubmitTask(ctx context.Context, req *models.TaskSubmitReq
 		}, err
 	}
 
-	// 5. Handle task validation asynchronously
-	go ts.processTaskAsync(ctx, task)
+	// 5. Handle task validation asynchronously - DISABLED: No need for sync validation
+	// go ts.processTaskAsync(ctx, task)
 
 	response := &models.TaskSubmitResponse{
 		Success: true,
