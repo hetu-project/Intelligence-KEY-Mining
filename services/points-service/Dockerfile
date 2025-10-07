@@ -1,6 +1,10 @@
 # Points Service Dockerfile
 FROM golang:1.21-alpine AS builder
 
+# Use mainland China Go module mirrors for faster downloads
+ENV GOPROXY=https://goproxy.cn,direct \
+    GOSUMDB=sum.golang.google.cn
+
 # Set working directory
 WORKDIR /app
 

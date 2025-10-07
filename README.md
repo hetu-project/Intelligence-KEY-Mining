@@ -3,6 +3,67 @@
 ## Introduction
 Intelligence-KEY-Mining is a decentralized mining system that implements Proof of Cognitive Work (PoCW) consensus mechanism. The system consists of multiple microservices including miner-gateway, validators, points service, and SBT service, all working together to validate social tasks (like Twitter retweets) and distribute rewards.
 
+## System Flow Diagram
+
+### Twitter Task Processing Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant MG as Miner-Gateway
+    participant BV as BatchVerifier
+    participant API as Twitter API
+    participant V1 as Validator-UI
+    participant V2 as Validator-Format
+    participant V3 as Validator-Semantic
+    participant RC as RoundCoordinator
+    participant PS as Points-Service
+
+    U->>MG: Submit Twitter task
+    MG->>BV: Queue task for verification
+    
+    Note over BV,API: Single Task Verification Phase
+    BV->>API: Verify retweet via external API
+    API-->>BV: Verification result
+    BV->>BV: VLC++ (user VLC increment)
+    BV->>BV: Task status: PENDING_VERIFICATION
+    
+    Note over BV,RC: Batch Collection Phase  
+    BV->>BV: Collect verified tasks into batch
+    BV->>RC: Send completed batch round
+    
+    Note over RC,V3: PoCW Consensus Phase
+    RC->>V1: Request validation (VLC + format check)
+    V1-->>RC: Vote + Quality score + Weight
+    
+    RC->>V2: Request validation (format validation)
+    V2-->>RC: Vote + Quality score + Weight
+    
+    RC->>V3: Request validation (semantic analysis)
+    V3-->>RC: Vote + Quality score + Weight
+    
+    RC->>RC: BFT consensus calculation
+    Note over RC: Weighted voting: >50% weight for approval
+    
+    Note over RC,PS: Points Distribution Phase
+    RC->>PS: Distribute points for approved batch
+    PS-->>RC: Distribution result
+    RC->>RC: Update task status: VERIFIED
+```
+
+## Core Architecture & Technologies
+
+This project builds a PoCW-based identity verification and reward system featuring:
+
+- **Vector Clocks (VLC)** for causal ordering and user progress tracking
+- **Multi-validator quality assessment** with specialized roles (UI, Format, Semantic)
+- **Weighted BFT consensus** for Byzantine fault-tolerant voting
+- **Microservices architecture** with HTTP REST API communication
+- **Batch processing** for efficient multi-task consensus
+- **Direct VLC-to-points mapping** for transparent reward distribution
+
+The architecture ensures reliable social task validation while maintaining decentralization through coordinated specialized validators.
+
 ## Quick Start
 
 ### 1. Navigate to Project Directory
@@ -304,64 +365,3 @@ const (
 - `services/miner-gateway/services/coordinator.go` (consensus round recording)
 - `services/batch_verifier.go` (batch verification recording)
 - `pkg/graph/graph_client.go` (DGraph client wrapper)
-
-## System Flow Diagram
-
-### Twitter Task Processing Flow
-
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant MG as Miner-Gateway
-    participant BV as BatchVerifier
-    participant API as Twitter API
-    participant V1 as Validator-UI
-    participant V2 as Validator-Format
-    participant V3 as Validator-Semantic
-    participant RC as RoundCoordinator
-    participant PS as Points-Service
-
-    U->>MG: Submit Twitter task
-    MG->>BV: Queue task for verification
-    
-    Note over BV,API: Single Task Verification Phase
-    BV->>API: Verify retweet via external API
-    API-->>BV: Verification result
-    BV->>BV: VLC++ (user VLC increment)
-    BV->>BV: Task status: PENDING_VERIFICATION
-    
-    Note over BV,RC: Batch Collection Phase  
-    BV->>BV: Collect verified tasks into batch
-    BV->>RC: Send completed batch round
-    
-    Note over RC,V3: PoCW Consensus Phase
-    RC->>V1: Request validation (VLC + format check)
-    V1-->>RC: Vote + Quality score + Weight
-    
-    RC->>V2: Request validation (format validation)
-    V2-->>RC: Vote + Quality score + Weight
-    
-    RC->>V3: Request validation (semantic analysis)
-    V3-->>RC: Vote + Quality score + Weight
-    
-    RC->>RC: BFT consensus calculation
-    Note over RC: Weighted voting: >50% weight for approval
-    
-    Note over RC,PS: Points Distribution Phase
-    RC->>PS: Distribute points for approved batch
-    PS-->>RC: Distribution result
-    RC->>RC: Update task status: VERIFIED
-```
-
-## Core Architecture & Technologies
-
-This project builds a PoCW-based identity verification and reward system featuring:
-
-- **Vector Clocks (VLC)** for causal ordering and user progress tracking
-- **Multi-validator quality assessment** with specialized roles (UI, Format, Semantic)
-- **Weighted BFT consensus** for Byzantine fault-tolerant voting
-- **Microservices architecture** with HTTP REST API communication
-- **Batch processing** for efficient multi-task consensus
-- **Direct VLC-to-points mapping** for transparent reward distribution
-
-The architecture ensures reliable social task validation while maintaining decentralization through coordinated specialized validators.
