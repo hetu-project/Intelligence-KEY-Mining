@@ -1,6 +1,10 @@
 # Build stage
 FROM golang:1.21-alpine AS builder
 
+# Use mainland China Go module mirrors for faster downloads
+ENV GOPROXY=https://goproxy.cn,direct \
+    GOSUMDB=sum.golang.google.cn
+
 # Install git and ca-certificates (needed for downloading dependencies)
 RUN apk add --no-cache git ca-certificates
 
