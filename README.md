@@ -131,6 +131,7 @@ MYSQL_USER=pocw_user
 MYSQL_PASSWORD=pocw_password
 DATABASE_URL=mysql://pocw_user:pocw_password@localhost:3306/pocw_db
 ```
+- Note: If you update the password, you need to update the password in the .env file and delete the old volume of mysql, by running the command: `docker volume rm intelligence-key-mining_mysql_data`.
 
 ### 2. Blockchain Configuration
 *Purpose: SBT service for Ethereum interaction and SBT management*
