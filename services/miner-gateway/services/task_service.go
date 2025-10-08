@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -696,4 +697,85 @@ func (ts *TaskService) GetTasksByTypeAndStatus(ctx context.Context, taskType, st
 // GetDB returns the database connection for internal service use
 func (ts *TaskService) GetDB() *sql.DB {
 	return ts.db
+}
+
+// UpdateTwitterLink updates the Twitter link and tweet ID for a retweet task
+func (ts *TaskService) UpdateTwitterLink(ctx context.Context, userWallet, oldTweetID, newTweetID, newTwitterLink string) error {
+	// Start transaction
+	tx, err := ts.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	// 1. Find and lock the task
+	var taskID, status, owner string
+	query := `
+		SELECT id, status, user_wallet 
+		FROM tasks 
+		WHERE task_type = 'twitter_retweet' 
+		  AND user_wallet = ? 
+		  AND JSON_EXTRACT(payload, '$.tweet_id') = ?
+		FOR UPDATE
+	`
+	err = tx.QueryRowContext(ctx, query, userWallet, oldTweetID).Scan(&taskID, &status, &owner)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("task not found")
+		}
+		return fmt.Errorf("failed to query task: %v", err)
+	}
+
+	// 2. Verify permissions
+	if owner != userWallet {
+		return fmt.Errorf("permission denied")
+	}
+
+	// 3. Check task status
+	if status == "PROCESSING" {
+		return fmt.Errorf("task is currently being processed")
+	}
+
+	// 4. Update the task payload
+	updateQuery := `
+		UPDATE tasks 
+		SET payload = JSON_SET(
+			payload, 
+			'$.tweet_id', ?,
+			'$.twitter_link', ?
+		),
+		updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`
+	result, err := tx.ExecContext(ctx, updateQuery, newTweetID, newTwitterLink, taskID)
+	if err != nil {
+		return fmt.Errorf("failed to update task: %v", err)
+	}
+
+	// Check if any rows were affected
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %v", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("no rows updated")
+	}
+
+	// 5. Optional: Log the modification (you can create a task_modifications table if needed)
+	logQuery := `
+		INSERT INTO task_modification_log (task_id, old_tweet_id, new_tweet_id, new_twitter_link, modified_by, modified_at)
+		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		ON DUPLICATE KEY UPDATE 
+		old_tweet_id = old_tweet_id  -- This will silently ignore if table doesn't exist
+	`
+	// Execute but ignore errors if the log table doesn't exist
+	tx.ExecContext(ctx, logQuery, taskID, oldTweetID, newTweetID, newTwitterLink, userWallet)
+
+	// 6. Commit transaction
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	log.Printf("Successfully updated Twitter link for task %s: %s -> %s", taskID, oldTweetID, newTweetID)
+	return nil
 }

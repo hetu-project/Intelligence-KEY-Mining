@@ -336,6 +336,70 @@ func (h *SBTHandler) UpdateInviteRelation(c *gin.Context) {
 	})
 }
 
+// BindTwitterID handles Twitter ID binding requests
+// PUT /api/v1/sbt/bind-twitter/:wallet
+func (h *SBTHandler) BindTwitterID(c *gin.Context) {
+	walletAddress := c.Param("wallet")
+
+	// Validate wallet address format
+	if !isValidWalletAddress(walletAddress) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid wallet address",
+			"message": "Wallet address must be a valid Ethereum address",
+		})
+		return
+	}
+
+	var req struct {
+		TwitterID string `json:"twitter_id" validate:"required"`
+	}
+
+	// Bind JSON request
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid request format",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	// Validate twitter_id
+	if req.TwitterID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Validation failed",
+			"message": "twitter_id is required",
+		})
+		return
+	}
+
+	// Update Twitter ID in user profile
+	err := h.metadataService.UpdateTwitterID(c.Request.Context(), walletAddress, req.TwitterID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":   "User not found",
+				"message": "User profile not found for the given wallet address",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to bind Twitter ID",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": "Twitter ID bound successfully",
+		"data": gin.H{
+			"wallet_address": walletAddress,
+			"twitter_id":     req.TwitterID,
+		},
+	})
+}
+
 // getContractAddress retrieves contract address
 func (h *SBTHandler) getContractAddress() string {
 	return os.Getenv("SBT_CONTRACT_ADDRESS")

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -284,6 +285,144 @@ func (tch *TaskCreationHandler) ListUserTaskCreations(c *gin.Context) {
 			"offset": offset,
 		},
 	})
+}
+
+// UpdateTwitterLink updates the Twitter link for a retweet task
+func (tch *TaskCreationHandler) UpdateTwitterLink(c *gin.Context) {
+	var req struct {
+		UserWallet     string `json:"user_wallet" binding:"required"`
+		OldTweetID     string `json:"old_tweet_id" binding:"required"`
+		NewTweetID     string `json:"new_tweet_id" binding:"required"`
+		NewTwitterLink string `json:"new_twitter_link" binding:"required"`
+	}
+
+	// Bind request parameters
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Invalid request format: " + err.Error(),
+		})
+		return
+	}
+
+	// Validate new tweet ID format (should be numeric and reasonable length)
+	if err := validateTweetID(req.NewTweetID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Invalid tweet ID format: " + err.Error(),
+		})
+		return
+	}
+
+	// Optional: Validate that the tweet ID matches the link
+	if extractedID, err := extractTweetIDFromLink(req.NewTwitterLink); err == nil {
+		if extractedID != req.NewTweetID {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "Tweet ID does not match the provided Twitter link",
+			})
+			return
+		}
+	}
+
+	// Update the task
+	err := tch.taskService.UpdateTwitterLink(c.Request.Context(), req.UserWallet, req.OldTweetID, req.NewTweetID, req.NewTwitterLink)
+	if err != nil {
+		// Handle different error types
+		switch {
+		case strings.Contains(err.Error(), "not found"):
+			c.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"message": "Task not found for the given user and tweet ID",
+			})
+		case strings.Contains(err.Error(), "permission denied"):
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "Permission denied: only task creator can modify the task",
+			})
+		case strings.Contains(err.Error(), "processing"):
+			c.JSON(http.StatusConflict, gin.H{
+				"success": false,
+				"message": "Task is currently being processed, please try again later",
+			})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": "Failed to update Twitter link: " + err.Error(),
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Twitter link updated successfully",
+		"data": gin.H{
+			"old_tweet_id":     req.OldTweetID,
+			"new_tweet_id":     req.NewTweetID,
+			"new_twitter_link": req.NewTwitterLink,
+			"updated_at":       time.Now(),
+		},
+		"warning": "Users who have already retweeted the old link need to retweet the new link for verification",
+	})
+}
+
+// extractTweetIDFromLink extracts tweet ID from Twitter/X URL
+func extractTweetIDFromLink(twitterLink string) (string, error) {
+	// Support both twitter.com and x.com domains
+	// Pattern: https://twitter.com/username/status/1234567890
+	// Pattern: https://x.com/username/status/1234567890
+
+	// Remove trailing parameters and fragments
+	if idx := strings.Index(twitterLink, "?"); idx != -1 {
+		twitterLink = twitterLink[:idx]
+	}
+	if idx := strings.Index(twitterLink, "#"); idx != -1 {
+		twitterLink = twitterLink[:idx]
+	}
+
+	// Extract tweet ID using regex or string manipulation
+	parts := strings.Split(twitterLink, "/")
+	if len(parts) < 6 {
+		return "", fmt.Errorf("invalid Twitter URL format")
+	}
+
+	// Find "status" part and get the next element
+	for i, part := range parts {
+		if part == "status" && i+1 < len(parts) {
+			tweetID := parts[i+1]
+			// Validate tweet ID (should be numeric)
+			if len(tweetID) < 10 || len(tweetID) > 20 {
+				return "", fmt.Errorf("invalid tweet ID length")
+			}
+			// Check if it's numeric
+			for _, char := range tweetID {
+				if char < '0' || char > '9' {
+					return "", fmt.Errorf("tweet ID must be numeric")
+				}
+			}
+			return tweetID, nil
+		}
+	}
+
+	return "", fmt.Errorf("could not extract tweet ID from URL")
+}
+
+// validateTweetID validates tweet ID format
+func validateTweetID(tweetID string) error {
+	// Check length (Twitter IDs are typically 10-20 digits)
+	if len(tweetID) < 10 || len(tweetID) > 20 {
+		return fmt.Errorf("invalid tweet ID length: must be between 10-20 characters")
+	}
+
+	// Check if it's numeric
+	for _, char := range tweetID {
+		if char < '0' || char > '9' {
+			return fmt.Errorf("tweet ID must be numeric")
+		}
+	}
+
+	return nil
 }
 
 // GetTaskCreationStats gets statistics for task creations

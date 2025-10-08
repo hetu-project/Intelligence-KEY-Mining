@@ -221,6 +221,7 @@ func setupRoutes(
 			taskCreation.GET("/status/:id", taskCreationHandler.GetTaskCreationStatus)
 			taskCreation.GET("/user/:wallet", taskCreationHandler.ListUserTaskCreations)
 			taskCreation.GET("/stats", taskCreationHandler.GetTaskCreationStats)
+			taskCreation.PUT("/update-twitter-link", taskCreationHandler.UpdateTwitterLink)
 		}
 
 		// Batch verification operations (temporarily disabled - will be redesigned in step 4)

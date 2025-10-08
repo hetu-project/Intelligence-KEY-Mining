@@ -689,6 +689,39 @@ func (ms *MetadataService) getUserSubnetsFromPointsService(ctx context.Context, 
 	return subnets, nil
 }
 
+// UpdateTwitterID updates the Twitter ID for a user
+func (ms *MetadataService) UpdateTwitterID(ctx context.Context, walletAddress, twitterID string) error {
+	// Check if user exists
+	var exists bool
+	checkQuery := `SELECT EXISTS(SELECT 1 FROM user_profiles WHERE wallet_address = ?)`
+	err := ms.db.QueryRowContext(ctx, checkQuery, walletAddress).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("failed to check user existence: %v", err)
+	}
+
+	if !exists {
+		return fmt.Errorf("user not found")
+	}
+
+	// Update Twitter ID
+	updateQuery := `UPDATE user_profiles SET twitter_id = ? WHERE wallet_address = ?`
+	result, err := ms.db.ExecContext(ctx, updateQuery, twitterID, walletAddress)
+	if err != nil {
+		return fmt.Errorf("failed to update Twitter ID: %v", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %v", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("no rows updated")
+	}
+
+	return nil
+}
+
 // FormatIPFSURI formats IPFS hash as URI (imported from pinata_service)
 func FormatIPFSURI(ipfsHash string) string {
 	return fmt.Sprintf("ipfs://%s", ipfsHash)
