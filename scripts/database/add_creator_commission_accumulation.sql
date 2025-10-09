@@ -12,6 +12,3 @@ CREATE TABLE IF NOT EXISTS creator_commission_accumulation (
     INDEX idx_last_updated (last_updated)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci 
 COMMENT='Accumulates fractional creator commissions across PoCW rounds';
-
--- Grant permissions
-GRANT SELECT, INSERT, UPDATE ON creator_commission_accumulation TO 'pocw_user'@'%';
