@@ -202,25 +202,32 @@ func (ms *MetadataService) GetDynamicMetadata(ctx context.Context, walletAddress
 		consecutiveDays = 0
 	}
 
+	// 3. Get today's contribution (dynamic calculation)
+	todayContribution, err := ms.getUserTodayContribution(ctx, walletAddress)
+	if err != nil {
+		// Don't block, use 0 as fallback
+		todayContribution = 0
+	}
+
 	// 3. Build dynamic attributes
 	dynamicAttrs := []models.Attribute{
 		{
-			TraitType:   "总积分",
+			TraitType:   "Total Points",
 			Value:       profile.TotalPoints,
 			DisplayType: "number",
 		},
 		{
-			TraitType:   "今日贡献",
-			Value:       profile.TodayContribution,
+			TraitType:   "Today Contribution",
+			Value:       todayContribution,
 			DisplayType: "number",
 		},
 		{
-			TraitType:   "累计挖矿积分",
+			TraitType:   "Total Mining Points",
 			Value:       miningTotalPoints,
 			DisplayType: "number",
 		},
 		{
-			TraitType:   "连续挖矿天数",
+			TraitType:   "Consecutive Mining Days",
 			Value:       consecutiveDays,
 			DisplayType: "number",
 		},
@@ -619,6 +626,89 @@ func (ms *MetadataService) getUserConsecutiveMiningDays(ctx context.Context, wal
 	}
 
 	return consecutiveDays, nil
+}
+
+// getUserTodayContribution calculates user's points earned today (dynamic calculation)
+func (ms *MetadataService) getUserTodayContribution(ctx context.Context, walletAddress string) (int, error) {
+	// Query points-service for today's points
+	if ms.pointsClient == nil {
+		// Fallback: return 0 if no points service configured
+		return 0, nil
+	}
+
+	// Build API URL for points history
+	pointsServiceURL := strings.TrimSuffix(os.Getenv("POINTS_SERVICE_URL"), "/")
+	if pointsServiceURL == "" {
+		log.Printf("Warning: POINTS_SERVICE_URL not set, cannot fetch today's contribution")
+		return 0, nil
+	}
+
+	// Use points history API with today's date filter
+	apiURL := fmt.Sprintf("%s/api/v1/points/history/%s", pointsServiceURL, walletAddress)
+
+	// Create HTTP request
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create request: %v", err)
+	}
+
+	// Make HTTP request
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		// Don't fail completely, return 0
+		log.Printf("Warning: failed to get points history from points service: %v", err)
+		return 0, nil
+	}
+	defer resp.Body.Close()
+
+	// Check response status
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Warning: points service returned status %d for points history", resp.StatusCode)
+		return 0, nil
+	}
+
+	// Parse response
+	var apiResponse struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Records []struct {
+				Date   string `json:"date"`
+				Points int    `json:"points"`
+			} `json:"records"`
+		} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
+		log.Printf("Warning: failed to decode points history response: %v", err)
+		return 0, nil
+	}
+
+	if !apiResponse.Success {
+		log.Printf("Warning: points service returned success=false for points history")
+		return 0, nil
+	}
+
+	// Calculate today's total points
+	today := time.Now().Format("2006-01-02")
+	todayPoints := 0
+
+	for _, record := range apiResponse.Data.Records {
+		// Parse the date from the record (handle both date formats)
+		recordDate := record.Date
+		if strings.Contains(recordDate, "T") {
+			// Handle ISO format like "2025-10-09T00:00:00Z"
+			if t, err := time.Parse(time.RFC3339, recordDate); err == nil {
+				recordDate = t.Format("2006-01-02")
+			}
+		}
+
+		if recordDate == today {
+			todayPoints += record.Points
+		}
+	}
+
+	return todayPoints, nil
 }
 
 // getUserSubnetsFromPointsService gets user subnets from points-service API

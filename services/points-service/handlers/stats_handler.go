@@ -498,6 +498,62 @@ func (sh *StatsHandler) GetDashboardStats(c *gin.Context) {
 	})
 }
 
+// GetSubnetUserRanking gets user ranking by points in a specific subnet
+func (sh *StatsHandler) GetSubnetUserRanking(c *gin.Context) {
+	subnetID := c.Param("subnet_id")
+	if subnetID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "subnet_id is required",
+		})
+		return
+	}
+
+	// Parse pagination parameters
+	page := 1
+	if pageParam := c.Query("page"); pageParam != "" {
+		if parsedPage, err := strconv.Atoi(pageParam); err == nil && parsedPage > 0 {
+			page = parsedPage
+		}
+	}
+
+	limit := 20 // Default limit
+	if limitParam := c.Query("limit"); limitParam != "" {
+		if parsedLimit, err := strconv.Atoi(limitParam); err == nil && parsedLimit > 0 && parsedLimit <= 100 {
+			limit = parsedLimit
+		}
+	}
+
+	offset := (page - 1) * limit
+
+	rankings, totalCount, err := sh.statsService.GetSubnetUserRanking(c.Request.Context(), subnetID, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to get subnet user ranking: " + err.Error(),
+		})
+		return
+	}
+
+	totalPages := (totalCount + limit - 1) / limit
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"subnet_id": subnetID,
+			"rankings":  rankings,
+			"pagination": gin.H{
+				"page":        page,
+				"limit":       limit,
+				"total_count": totalCount,
+				"total_pages": totalPages,
+				"has_next":    page < totalPages,
+				"has_prev":    page > 1,
+			},
+		},
+	})
+}
+
 // RegisterRoutes registers HTTP routes for stats
 func (sh *StatsHandler) RegisterRoutes(router *gin.RouterGroup) {
 	stats := router.Group("/stats")
@@ -521,6 +577,7 @@ func (sh *StatsHandler) RegisterRoutes(router *gin.RouterGroup) {
 		stats.GET("/subnets/:subnet_id", sh.GetSubnetDetails)
 		stats.GET("/subnets/:subnet_id/points-today", sh.GetSubnetPointsToday)
 		stats.GET("/subnets/:subnet_id/users-count", sh.GetSubnetUsersCount)
+		stats.GET("/subnets/:subnet_id/ranking", sh.GetSubnetUserRanking)
 
 		// User statistics
 		stats.GET("/users/ranking", sh.GetUserPointsRanking)

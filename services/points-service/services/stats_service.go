@@ -83,6 +83,15 @@ type SubnetLeader struct {
 	Rank           int    `json:"rank"`
 }
 
+// SubnetUserRank represents user ranking in a specific subnet
+type SubnetUserRank struct {
+	UserWallet     string `json:"user_wallet" db:"user_wallet"`
+	DisplayName    string `json:"display_name" db:"display_name"`
+	TotalPoints    int    `json:"total_points" db:"total_points"`
+	CompletedTasks int    `json:"completed_tasks" db:"completed_tasks"`
+	Rank           int    `json:"rank" db:"user_rank"`
+}
+
 // DailyPerformer represents user who completed tasks today
 type DailyPerformer struct {
 	UserWallet     string `json:"user_wallet" db:"user_wallet"`
@@ -517,6 +526,84 @@ func (ss *StatsService) GetUserSubnetSummary(ctx context.Context, userWallet str
 	}, nil
 }
 
+// GetSubnetUserRanking gets user ranking by points in a specific subnet
+func (ss *StatsService) GetSubnetUserRanking(ctx context.Context, subnetID string, limit, offset int) ([]*SubnetUserRank, int, error) {
+	// Get total count of users in this subnet first
+	countQuery := `
+		SELECT COUNT(DISTINCT utc.user_wallet) 
+		FROM user_task_completions utc 
+		WHERE utc.subnet_id = ?
+	`
+	var totalCount int
+	err := ss.db.QueryRowContext(ctx, countQuery, subnetID).Scan(&totalCount)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get subnet users count: %v", err)
+	}
+
+	// Get user ranking with proper handling of duplicate points_history records
+	query := `
+		SELECT 
+			ranked_users.user_wallet,
+			up.display_name,
+			ranked_users.total_points,
+			ranked_users.completed_tasks,
+			ranked_users.user_rank
+		FROM (
+			SELECT 
+				utc.user_wallet,
+				COALESCE(SUM(COALESCE(max_points.max_points, utc.points_earned)), SUM(utc.points_earned)) as total_points,
+				COUNT(DISTINCT utc.task_id) as completed_tasks,
+				ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(COALESCE(max_points.max_points, utc.points_earned)), SUM(utc.points_earned)) DESC) as user_rank
+			FROM user_task_completions utc
+			LEFT JOIN (
+				SELECT 
+					ph.wallet_address,
+					SUBSTRING(ph.tx_ref, 16) as task_id,
+					MAX(ph.points) as max_points
+				FROM points_history ph 
+				WHERE ph.tx_ref LIKE 'pocw-consensus-%'
+				GROUP BY ph.wallet_address, SUBSTRING(ph.tx_ref, 16)
+			) max_points ON max_points.task_id = utc.task_id AND max_points.wallet_address = utc.user_wallet
+			WHERE utc.subnet_id = ?
+			GROUP BY utc.user_wallet
+		) ranked_users
+		LEFT JOIN user_profiles up ON ranked_users.user_wallet = up.wallet_address
+		ORDER BY ranked_users.user_rank
+		LIMIT ? OFFSET ?
+	`
+
+	rows, err := ss.db.QueryContext(ctx, query, subnetID, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query subnet user ranking: %v", err)
+	}
+	defer rows.Close()
+
+	var rankings []*SubnetUserRank
+	for rows.Next() {
+		var ranking SubnetUserRank
+		var displayName sql.NullString
+
+		err := rows.Scan(
+			&ranking.UserWallet,
+			&displayName,
+			&ranking.TotalPoints,
+			&ranking.CompletedTasks,
+			&ranking.Rank,
+		)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to scan subnet user ranking row: %v", err)
+		}
+
+		if displayName.Valid {
+			ranking.DisplayName = displayName.String
+		}
+
+		rankings = append(rankings, &ranking)
+	}
+
+	return rankings, totalCount, nil
+}
+
 // GetActiveMinersCount gets count of users who have participated in retweet tasks (all time)
 func (ss *StatsService) GetActiveMinersCount(ctx context.Context) (int, error) {
 	query := `SELECT COUNT(DISTINCT user_wallet) FROM user_task_completions`
@@ -572,10 +659,11 @@ func (ss *StatsService) GetSubnetLeaders(ctx context.Context, limit, offset int)
 			SELECT 
 				utc.subnet_id,
 				utc.user_wallet,
-				SUM(utc.points_earned) as total_points,
-				COUNT(utc.task_id) as completed_tasks,
-				ROW_NUMBER() OVER (PARTITION BY utc.subnet_id ORDER BY SUM(utc.points_earned) DESC) as rank_in_subnet
+				COALESCE(SUM(ph.points), SUM(utc.points_earned)) as total_points,
+				COUNT(DISTINCT utc.task_id) as completed_tasks,
+				ROW_NUMBER() OVER (PARTITION BY utc.subnet_id ORDER BY COALESCE(SUM(ph.points), SUM(utc.points_earned)) DESC) as rank_in_subnet
 			FROM user_task_completions utc
+			LEFT JOIN points_history ph ON ph.tx_ref LIKE CONCAT('pocw-consensus-', utc.task_id) AND ph.wallet_address = utc.user_wallet
 			GROUP BY utc.subnet_id, utc.user_wallet
 		) ranked_users
 		INNER JOIN subnets s ON ranked_users.subnet_id = s.id
