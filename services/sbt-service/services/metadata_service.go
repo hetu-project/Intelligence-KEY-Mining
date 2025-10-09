@@ -352,10 +352,11 @@ func (ms *MetadataService) getUserProfile(ctx context.Context, walletAddress str
 	var profile models.UserProfile
 	var subnetsJSON, nftsJSON sql.NullString
 	var inviter sql.NullString
+	var imageURI sql.NullString
 
 	err := ms.db.QueryRowContext(ctx, query, walletAddress).Scan(
 		&profile.WalletAddress, &profile.DisplayName, &profile.RegistrationDate, &inviter,
-		&profile.TotalPoints, &profile.TodayContribution, &profile.TokenURI, &profile.TokenID, &profile.ImageURI, &profile.IPFSHash,
+		&profile.TotalPoints, &profile.TodayContribution, &profile.TokenURI, &profile.TokenID, &imageURI, &profile.IPFSHash,
 		&subnetsJSON, &nftsJSON, &profile.CreatedAt, &profile.UpdatedAt,
 	)
 
@@ -365,6 +366,11 @@ func (ms *MetadataService) getUserProfile(ctx context.Context, walletAddress str
 
 	if inviter.Valid {
 		profile.Inviter = inviter.String
+	}
+
+	// Handle nullable image_uri
+	if imageURI.Valid {
+		profile.ImageURI = imageURI.String
 	}
 
 	// Handle TokenID conversion

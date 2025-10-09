@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"sync"
 	"time"
@@ -698,8 +699,10 @@ func (rc *RoundCoordinator) distributeBatchRoundPoints(batchTask *models.Task) {
 		}
 	}
 
-	// 2. Calculate and distribute 5% commission to subnet creators
-	rc.distributeCreatorCommissions(ctx, verifiedTasksData, roundID)
+	// 2. Calculate and distribute 5% commission to subnet creators based on actual points distributed
+	if result != nil {
+		rc.distributeCreatorCommissions(ctx, verifiedTasksData, result.UserAllocations, roundID)
+	}
 
 	// 3. Call third-party callback after points distribution
 	if rc.callbackService != nil && result != nil {
@@ -1140,8 +1143,8 @@ func (rc *RoundCoordinator) GetCoordinatorStatus() map[string]interface{} {
 	return status
 }
 
-// distributeCreatorCommissions distributes 5% commission to subnet creators
-func (rc *RoundCoordinator) distributeCreatorCommissions(ctx context.Context, verifiedTasks []points.TaskVLC, roundID string) {
+// distributeCreatorCommissions distributes 5% commission to subnet creators based on actual points distributed
+func (rc *RoundCoordinator) distributeCreatorCommissions(ctx context.Context, verifiedTasks []points.TaskVLC, userAllocations []points.UserPointsResult, roundID string) {
 	if rc.pointsClient == nil {
 		log.Printf("No points client available for creator commissions")
 		return
@@ -1149,9 +1152,17 @@ func (rc *RoundCoordinator) distributeCreatorCommissions(ctx context.Context, ve
 
 	log.Printf("🎯 Calculating 5%% creator commissions for %d verified tasks in round %s", len(verifiedTasks), roundID)
 
-	// Group tasks by creator and calculate commissions
-	creatorCommissions := make(map[string]int) // creator_wallet -> total_commission_points
-	taskCreatorMap := make(map[string]string)  // task_id -> creator_wallet
+	// Create mapping from user wallet to actual points received (including NFT bonus)
+	userActualPoints := make(map[string]int) // user_wallet -> actual_points_received
+	for _, allocation := range userAllocations {
+		if allocation.UpdateStatus == "success" {
+			userActualPoints[allocation.UserWallet] = allocation.RoundedPoints
+		}
+	}
+
+	// Group tasks by creator and calculate commissions based on actual points
+	creatorCommissions := make(map[string]float64) // creator_wallet -> total_commission_points (float for precision)
+	taskCreatorMap := make(map[string]string)      // task_id -> creator_wallet
 
 	for _, taskVLC := range verifiedTasks {
 		// Get task details to find subnet and creator
@@ -1166,13 +1177,20 @@ func (rc *RoundCoordinator) distributeCreatorCommissions(ctx context.Context, ve
 			continue
 		}
 
-		// Calculate 5% commission
-		commission := int(float64(taskVLC.VLCValue) * 0.05)
+		// Get actual points received by the user (including NFT bonus)
+		actualPoints, exists := userActualPoints[taskVLC.UserWallet]
+		if !exists {
+			log.Printf("No points allocation found for user %s in task %s", taskVLC.UserWallet, taskVLC.TaskID)
+			continue
+		}
+
+		// Calculate 5% commission based on actual points received (including NFT bonus)
+		commission := float64(actualPoints) * 0.05
 		if commission > 0 {
 			creatorCommissions[taskCreator] += commission
 			taskCreatorMap[taskVLC.TaskID] = taskCreator
-			log.Printf("   Task %s: %d points → %d commission to creator %s",
-				taskVLC.TaskID, taskVLC.VLCValue, commission, taskCreator[:10]+"...")
+			log.Printf("   Task %s: User %s got %d points → %.2f commission to creator %s",
+				taskVLC.TaskID, taskVLC.UserWallet[:10]+"...", actualPoints, commission, taskCreator[:10]+"...")
 		}
 	}
 
@@ -1181,10 +1199,39 @@ func (rc *RoundCoordinator) distributeCreatorCommissions(ctx context.Context, ve
 		return
 	}
 
-	// Distribute commissions to creators
+	// Distribute commissions to creators with cross-round accumulation
 	totalCommissionPoints := 0
-	for creatorWallet, commissionPoints := range creatorCommissions {
+	for creatorWallet, currentRoundCommission := range creatorCommissions {
+		if currentRoundCommission <= 0 {
+			continue
+		}
+
+		// Get previously accumulated commission
+		previousAccumulated, err := rc.getAccumulatedCommission(ctx, creatorWallet)
+		if err != nil {
+			log.Printf("Failed to get accumulated commission for creator %s: %v", creatorWallet[:10]+"...", err)
+			continue
+		}
+
+		// Calculate total accumulated commission (previous + current round)
+		totalAccumulated := previousAccumulated + currentRoundCommission
+
+		// Check if we can distribute integer points
+		commissionPoints := int(math.Floor(totalAccumulated))
+		remainingAccumulated := totalAccumulated - float64(commissionPoints)
+
+		log.Printf("💰 Creator %s: previous=%.3f + current=%.3f = total=%.3f → distribute=%d, remain=%.3f",
+			creatorWallet[:10]+"...", previousAccumulated, currentRoundCommission, totalAccumulated, commissionPoints, remainingAccumulated)
+
+		// Update accumulated commission in database (even if no points distributed)
+		if err := rc.updateAccumulatedCommission(ctx, creatorWallet, remainingAccumulated, commissionPoints); err != nil {
+			log.Printf("Failed to update accumulated commission for creator %s: %v", creatorWallet[:10]+"...", err)
+			continue
+		}
+
+		// Only distribute if we have integer points to give
 		if commissionPoints <= 0 {
+			log.Printf("Commission for creator %s accumulated to %.3f - no integer points to distribute yet", creatorWallet[:10]+"...", totalAccumulated)
 			continue
 		}
 
@@ -1211,7 +1258,8 @@ func (rc *RoundCoordinator) distributeCreatorCommissions(ctx context.Context, ve
 		if err != nil {
 			log.Printf("❌ Failed to distribute creator commission to %s: %v", creatorWallet[:10]+"...", err)
 		} else {
-			log.Printf("✅ Creator commission distributed: %d points to %s", commissionPoints, creatorWallet[:10]+"...")
+			log.Printf("✅ Creator commission distributed: %d points (from %.3f accumulated) to %s",
+				commissionPoints, totalAccumulated, creatorWallet[:10]+"...")
 			totalCommissionPoints += commissionPoints
 
 			if result != nil && len(result.UserAllocations) > 0 {
@@ -1224,6 +1272,39 @@ func (rc *RoundCoordinator) distributeCreatorCommissions(ctx context.Context, ve
 	}
 
 	log.Printf("🎉 Total creator commissions distributed: %d points to %d creators", totalCommissionPoints, len(creatorCommissions))
+}
+
+// getAccumulatedCommission gets the accumulated commission for a creator
+func (rc *RoundCoordinator) getAccumulatedCommission(ctx context.Context, creatorWallet string) (float64, error) {
+	query := `SELECT accumulated_commission FROM creator_commission_accumulation WHERE creator_wallet = ?`
+	var accumulated float64
+	err := rc.taskService.GetDB().QueryRowContext(ctx, query, creatorWallet).Scan(&accumulated)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0.0, nil // No previous accumulation
+		}
+		return 0.0, fmt.Errorf("failed to get accumulated commission: %v", err)
+	}
+	return accumulated, nil
+}
+
+// updateAccumulatedCommission updates the accumulated commission for a creator
+func (rc *RoundCoordinator) updateAccumulatedCommission(ctx context.Context, creatorWallet string, newAccumulated float64, distributedPoints int) error {
+	query := `
+		INSERT INTO creator_commission_accumulation (creator_wallet, accumulated_commission, total_distributed)
+		VALUES (?, ?, ?)
+		ON DUPLICATE KEY UPDATE 
+		accumulated_commission = ?,
+		total_distributed = total_distributed + ?,
+		last_updated = CURRENT_TIMESTAMP
+	`
+	_, err := rc.taskService.GetDB().ExecContext(ctx, query,
+		creatorWallet, newAccumulated, distributedPoints,
+		newAccumulated, distributedPoints)
+	if err != nil {
+		return fmt.Errorf("failed to update accumulated commission: %v", err)
+	}
+	return nil
 }
 
 // getTaskCreator gets the creator wallet address for a task by looking up subnet info

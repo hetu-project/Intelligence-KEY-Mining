@@ -1,0 +1,17 @@
+-- Add creator commission accumulation table
+-- This table stores accumulated fractional commissions for task creators
+
+CREATE TABLE IF NOT EXISTS creator_commission_accumulation (
+    creator_wallet VARCHAR(42) PRIMARY KEY COMMENT 'Creator wallet address',
+    accumulated_commission DECIMAL(10,3) NOT NULL DEFAULT 0.000 COMMENT 'Accumulated commission (supports 3 decimal places)',
+    total_distributed INT NOT NULL DEFAULT 0 COMMENT 'Total integer points distributed so far',
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update time',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'Record creation time',
+    
+    INDEX idx_creator_wallet (creator_wallet),
+    INDEX idx_last_updated (last_updated)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci 
+COMMENT='Accumulates fractional creator commissions across PoCW rounds';
+
+-- Grant permissions
+GRANT SELECT, INSERT, UPDATE ON creator_commission_accumulation TO 'pocw_user'@'%';
