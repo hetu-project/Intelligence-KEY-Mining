@@ -151,12 +151,30 @@ func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, err
 			COUNT(DISTINCT t.id) as total_tasks,
 			COUNT(DISTINCT CASE WHEN utc.points_earned > 0 THEN t.id END) as completed_tasks,
 			COUNT(DISTINCT utc.user_wallet) as unique_users,
-			COALESCE(SUM(utc.points_earned), 0) as total_points_distributed,
-			COALESCE(SUM(CASE WHEN DATE(utc.completed_at) = CURDATE() THEN utc.points_earned ELSE 0 END), 0) as today_points_distributed,
+			COALESCE(SUM(COALESCE(max_points.max_points, utc.points_earned)), 0) as total_points_distributed,
+			COALESCE(SUM(CASE WHEN DATE(utc.completed_at) = CURDATE() THEN COALESCE(max_points_today.max_points, utc.points_earned) ELSE 0 END), 0) as today_points_distributed,
 			COUNT(DISTINCT CASE WHEN DATE(utc.completed_at) = CURDATE() THEN utc.user_wallet END) as today_active_users
 		FROM subnets s
 		LEFT JOIN tasks t ON s.id = t.subnet_id
 		LEFT JOIN user_task_completions utc ON t.id = utc.task_id
+		LEFT JOIN (
+			SELECT 
+				ph.wallet_address,
+				SUBSTRING(ph.tx_ref, 16) as task_id,
+				MAX(ph.points) as max_points
+			FROM points_history ph 
+			WHERE ph.tx_ref LIKE 'pocw-consensus-%'
+			GROUP BY ph.wallet_address, SUBSTRING(ph.tx_ref, 16)
+		) max_points ON max_points.task_id = utc.task_id AND max_points.wallet_address = utc.user_wallet
+		LEFT JOIN (
+			SELECT 
+				ph.wallet_address,
+				SUBSTRING(ph.tx_ref, 16) as task_id,
+				MAX(ph.points) as max_points
+			FROM points_history ph 
+			WHERE ph.tx_ref LIKE 'pocw-consensus-%' AND DATE(ph.created_at) = CURDATE()
+			GROUP BY ph.wallet_address, SUBSTRING(ph.tx_ref, 16)
+		) max_points_today ON max_points_today.task_id = utc.task_id AND max_points_today.wallet_address = utc.user_wallet
 		WHERE s.status = 'active'
 		GROUP BY s.id, s.name, s.icon, s.creator_wallet
 		ORDER BY total_points_distributed DESC
