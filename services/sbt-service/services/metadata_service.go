@@ -670,12 +670,12 @@ func (ms *MetadataService) getUserTodayContribution(ctx context.Context, walletA
 
 	// Parse response
 	var apiResponse struct {
-		Success bool `json:"success"`
-		Data    struct {
-			Records []struct {
+		Status string `json:"status"`
+		Data   struct {
+			History []struct {
 				Date   string `json:"date"`
 				Points int    `json:"points"`
-			} `json:"records"`
+			} `json:"history"`
 		} `json:"data"`
 	}
 
@@ -684,8 +684,8 @@ func (ms *MetadataService) getUserTodayContribution(ctx context.Context, walletA
 		return 0, nil
 	}
 
-	if !apiResponse.Success {
-		log.Printf("Warning: points service returned success=false for points history")
+	if apiResponse.Status != "success" {
+		log.Printf("Warning: points service returned status=%s for points history", apiResponse.Status)
 		return 0, nil
 	}
 
@@ -693,7 +693,7 @@ func (ms *MetadataService) getUserTodayContribution(ctx context.Context, walletA
 	today := time.Now().Format("2006-01-02")
 	todayPoints := 0
 
-	for _, record := range apiResponse.Data.Records {
+	for _, record := range apiResponse.Data.History {
 		// Parse the date from the record (handle both date formats)
 		recordDate := record.Date
 		if strings.Contains(recordDate, "T") {
