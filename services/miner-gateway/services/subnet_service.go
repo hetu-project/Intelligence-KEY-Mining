@@ -59,14 +59,16 @@ func (ss *SubnetService) FindOrCreateSubnet(ctx context.Context, req *models.Sub
 // CreateSubnet creates a new subnet
 func (ss *SubnetService) CreateSubnet(ctx context.Context, subnet *models.Subnet) error {
 	query := `
-		INSERT INTO subnets (id, name, icon, creator_wallet, created_at, updated_at, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO subnets (id, name, icon, x_url, website, creator_wallet, created_at, updated_at, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	_, err := ss.db.ExecContext(ctx, query,
 		subnet.ID,
 		subnet.Name,
 		subnet.Icon,
+		subnet.XURL,
+		subnet.Website,
 		subnet.CreatorWallet,
 		subnet.CreatedAt,
 		subnet.UpdatedAt,
@@ -83,7 +85,7 @@ func (ss *SubnetService) CreateSubnet(ctx context.Context, subnet *models.Subnet
 // GetSubnetByName gets subnet by name
 func (ss *SubnetService) GetSubnetByName(ctx context.Context, name string) (*models.Subnet, error) {
 	query := `
-		SELECT id, name, icon, creator_wallet, created_at, updated_at, status
+		SELECT id, name, icon, x_url, website, creator_wallet, created_at, updated_at, status
 		FROM subnets 
 		WHERE name = ? AND status = 'active'
 	`
@@ -93,6 +95,8 @@ func (ss *SubnetService) GetSubnetByName(ctx context.Context, name string) (*mod
 		&subnet.ID,
 		&subnet.Name,
 		&subnet.Icon,
+		&subnet.XURL,
+		&subnet.Website,
 		&subnet.CreatorWallet,
 		&subnet.CreatedAt,
 		&subnet.UpdatedAt,
@@ -112,7 +116,7 @@ func (ss *SubnetService) GetSubnetByName(ctx context.Context, name string) (*mod
 // GetSubnetByID gets subnet by ID
 func (ss *SubnetService) GetSubnetByID(ctx context.Context, id string) (*models.Subnet, error) {
 	query := `
-		SELECT id, name, icon, creator_wallet, created_at, updated_at, status
+		SELECT id, name, icon, x_url, website, creator_wallet, created_at, updated_at, status
 		FROM subnets 
 		WHERE id = ?
 	`
@@ -122,6 +126,8 @@ func (ss *SubnetService) GetSubnetByID(ctx context.Context, id string) (*models.
 		&subnet.ID,
 		&subnet.Name,
 		&subnet.Icon,
+		&subnet.XURL,
+		&subnet.Website,
 		&subnet.CreatorWallet,
 		&subnet.CreatedAt,
 		&subnet.UpdatedAt,
@@ -138,7 +144,7 @@ func (ss *SubnetService) GetSubnetByID(ctx context.Context, id string) (*models.
 // ListSubnets lists all active subnets
 func (ss *SubnetService) ListSubnets(ctx context.Context) ([]*models.Subnet, error) {
 	query := `
-		SELECT id, name, icon, creator_wallet, created_at, updated_at, status
+		SELECT id, name, icon, x_url, website, creator_wallet, created_at, updated_at, status
 		FROM subnets 
 		WHERE status = 'active'
 		ORDER BY created_at DESC
@@ -157,6 +163,8 @@ func (ss *SubnetService) ListSubnets(ctx context.Context) ([]*models.Subnet, err
 			&subnet.ID,
 			&subnet.Name,
 			&subnet.Icon,
+			&subnet.XURL,
+			&subnet.Website,
 			&subnet.CreatorWallet,
 			&subnet.CreatedAt,
 			&subnet.UpdatedAt,

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math"
@@ -29,6 +30,134 @@ func NewPointsService(db *sql.DB, config *models.PointsConfig, nftService *NFTSe
 		config:     config,
 		nftService: nftService,
 	}
+}
+
+// CheckUserTelegramTaskToday checks if user has completed a Telegram task for the subnet today
+func (ps *PointsService) CheckUserTelegramTaskToday(ctx context.Context, userWallet, subnetID, date string) (bool, error) {
+	query := `
+		SELECT COUNT(*) 
+		FROM points_history 
+		WHERE wallet_address = ? 
+		  AND source = ? 
+		  AND DATE(record_date) = ?
+		  AND JSON_EXTRACT(metadata, '$.subnet_id') = ?
+	`
+
+	var count int
+	err := ps.db.QueryRowContext(ctx, query,
+		userWallet, models.PointsSourceTelegramTask, date, subnetID).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
+
+// GetUserCompletedTasks gets completed tasks for a user
+func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, taskType string, limit, offset int) ([]models.UserCompletedTask, int, error) {
+	// Build query with optional task type filter
+	whereClause := "WHERE ph.wallet_address = ?"
+	args := []interface{}{userWallet}
+
+	if taskType != "" && taskType != "all" {
+		// Map task type to source
+		var source string
+		switch taskType {
+		case "twitter_retweet":
+			source = models.PointsSourceTwitterRetweet
+		case "telegram_task":
+			source = models.PointsSourceTelegramTask
+		case "task_creation":
+			source = models.PointsSourceTaskCreation
+		default:
+			return nil, 0, fmt.Errorf("unsupported task type: %s", taskType)
+		}
+		whereClause += " AND ph.source = ?"
+		args = append(args, source)
+	}
+
+	// Query for completed tasks from points_history
+	query := fmt.Sprintf(`
+		SELECT 
+			COALESCE(ph.task_id, '') as task_id,
+			ph.source,
+			'completed' as status,
+			ph.record_date,
+			ph.points,
+			COALESCE(ph.metadata, '{}') as metadata
+		FROM points_history ph
+		%s
+		ORDER BY ph.record_date DESC
+		LIMIT ? OFFSET ?
+	`, whereClause)
+
+	args = append(args, limit, offset)
+
+	rows, err := ps.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query completed tasks: %v", err)
+	}
+	defer rows.Close()
+
+	var tasks []models.UserCompletedTask
+	for rows.Next() {
+		var task models.UserCompletedTask
+		var metadataJSON string
+		var source string
+
+		err := rows.Scan(
+			&task.TaskID,
+			&source,
+			&task.Status,
+			&task.CompletedAt,
+			&task.PointsEarned,
+			&metadataJSON,
+		)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to scan task: %v", err)
+		}
+
+		// Map source to task type
+		switch source {
+		case models.PointsSourceTwitterRetweet:
+			task.TaskType = "twitter_retweet"
+		case models.PointsSourceTelegramTask:
+			task.TaskType = "telegram_task"
+		case models.PointsSourceTaskCreation:
+			task.TaskType = "task_creation"
+		default:
+			task.TaskType = "unknown"
+		}
+
+		// Parse metadata
+		var metadata map[string]interface{}
+		if err := json.Unmarshal([]byte(metadataJSON), &metadata); err == nil {
+			task.TaskDetails = metadata
+			if subnetID, ok := metadata["subnet_id"].(string); ok {
+				task.SubnetID = subnetID
+			}
+		}
+
+		// For now, assume all tasks are valid (Twitter link modification check would require miner-gateway integration)
+		task.IsValid = true
+
+		tasks = append(tasks, task)
+	}
+
+	// Get total count
+	countQuery := fmt.Sprintf(`
+		SELECT COUNT(*) 
+		FROM points_history ph
+		%s
+	`, whereClause)
+
+	var total int
+	err = ps.db.QueryRowContext(ctx, countQuery, args[:len(args)-2]...).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get total count: %v", err)
+	}
+
+	return tasks, total, nil
 }
 
 // DistributePoints distributes points (core method)

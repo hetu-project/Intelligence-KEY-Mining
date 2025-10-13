@@ -179,8 +179,11 @@ func setupRouter(metadataService *services.MetadataService, blockchainService *s
 			// Update invite relation
 			sbt.PUT("/invite/:wallet", sbtHandler.UpdateInviteRelation)
 
-			// Bind Twitter ID
+			// Bind Twitter ID (legacy)
 			sbt.PUT("/bind-twitter/:wallet", sbtHandler.BindTwitterID)
+
+			// Bind Social Platform (unified)
+			sbt.PUT("/bind-social/:wallet", sbtHandler.BindSocialPlatform)
 		}
 	}
 

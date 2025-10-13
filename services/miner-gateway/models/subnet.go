@@ -9,6 +9,8 @@ type Subnet struct {
 	ID            string    `json:"id" db:"id"`
 	Name          string    `json:"name" db:"name"`
 	Icon          string    `json:"icon" db:"icon"`
+	XURL          string    `json:"x_url" db:"x_url"`     // Project X/Twitter URL
+	Website       string    `json:"website" db:"website"` // Project official website
 	CreatorWallet string    `json:"creator_wallet" db:"creator_wallet"`
 	CreatedAt     time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at" db:"updated_at"`
@@ -80,6 +82,8 @@ type InvitationReward struct {
 type SubnetCreateRequest struct {
 	Name          string `json:"project_name" validate:"required,max=200"`
 	Icon          string `json:"project_icon" validate:"url,max=500"`
+	XURL          string `json:"x_url" validate:"omitempty,url,max=500"`   // Project X/Twitter URL
+	Website       string `json:"website" validate:"omitempty,url,max=500"` // Project official website
 	CreatorWallet string `json:"creator_wallet" validate:"required"`
 }
 
@@ -88,6 +92,8 @@ type SubnetResponse struct {
 	ID            string    `json:"id"`
 	Name          string    `json:"name"`
 	Icon          string    `json:"icon"`
+	XURL          string    `json:"x_url"`   // Project X/Twitter URL
+	Website       string    `json:"website"` // Project official website
 	CreatorWallet string    `json:"creator_wallet"`
 	CreatedAt     time.Time `json:"created_at"`
 	Status        string    `json:"status"`

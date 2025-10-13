@@ -73,12 +73,16 @@ func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 	switch req.TaskType {
 	case "twitter_retweet":
 		internalTaskType = models.TwitterRetweetTask // Maps to "twitter_retweet"
+	case "twitter_post":
+		internalTaskType = models.TwitterPostTask // Maps to "twitter_post"
 	case "task_creation":
 		internalTaskType = models.TaskCreationTask // Maps to "task_creation"
+	case "telegram_task":
+		internalTaskType = models.TelegramTask // Maps to "telegram_task"
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"message": "Invalid task type. Must be 'twitter_retweet' or 'task_creation'",
+			"message": "Invalid task type. Must be 'twitter_retweet', 'twitter_post', 'task_creation', or 'telegram_task'",
 		})
 		return
 	}
@@ -89,6 +93,8 @@ func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 		subnetReq := &models.SubnetCreateRequest{
 			Name:          req.ProjectName,
 			Icon:          req.ProjectIcon,
+			XURL:          req.XURL,    // New field for X/Twitter URL
+			Website:       req.Website, // New field for official website
 			CreatorWallet: req.UserWallet,
 		}
 
@@ -115,13 +121,20 @@ func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 
 	expiresAt := req.Deadline
 
-	// Build task submission request
-	taskReq := &models.TaskSubmitRequest{
-		UserWallet: req.UserWallet,
-		TaskType:   string(internalTaskType), // Use internal task type
-		SubnetID:   subnetID,
-		ExpiresAt:  &expiresAt,
-		Payload: map[string]interface{}{
+	// Build task submission request with dynamic payload based on task type
+	var payload map[string]interface{}
+
+	switch internalTaskType {
+	case models.TwitterRetweetTask:
+		// Validate required Twitter fields
+		if req.TwitterUsername == "" || req.TwitterLink == "" || req.TweetID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "Twitter task requires twitter_username, twitter_link, and tweet_id",
+			})
+			return
+		}
+		payload = map[string]interface{}{
 			"project_name":     req.ProjectName,
 			"project_icon":     req.ProjectIcon,
 			"description":      req.Description,
@@ -129,7 +142,72 @@ func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 			"twitter_link":     req.TwitterLink,
 			"tweet_id":         req.TweetID,
 			"subnet_id":        subnetID,
-		},
+		}
+
+	case models.TelegramTask:
+		// Validate required Telegram fields
+		if req.TelegramChannel == "" || req.ActionType == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "Telegram task requires telegram_channel and action_type",
+			})
+			return
+		}
+		payload = map[string]interface{}{
+			"project_name":     req.ProjectName,
+			"project_icon":     req.ProjectIcon,
+			"description":      req.Description,
+			"telegram_channel": req.TelegramChannel,
+			"action_type":      req.ActionType,
+			"message_id":       req.MessageID,
+			"telegram_link":    req.TelegramLink,
+			"required_action":  req.RequiredAction,
+			"subnet_id":        subnetID,
+		}
+
+	case models.TwitterPostTask:
+		// Validate required Twitter post fields
+		if req.PostContent == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "Twitter post task requires post_content",
+			})
+			return
+		}
+		payload = map[string]interface{}{
+			"project_name":    req.ProjectName,
+			"project_icon":    req.ProjectIcon,
+			"description":     req.Description,
+			"post_content":    req.PostContent,
+			"hash_tags":       req.HashTags,
+			"mention_users":   req.MentionUsers,
+			"required_action": req.RequiredAction,
+			"subnet_id":       subnetID,
+		}
+
+	case models.TaskCreationTask:
+		// Task creation payload (existing logic)
+		payload = map[string]interface{}{
+			"project_name": req.ProjectName,
+			"project_icon": req.ProjectIcon,
+			"description":  req.Description,
+			"subnet_id":    subnetID,
+		}
+
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Unsupported task type for payload generation",
+		})
+		return
+	}
+
+	taskReq := &models.TaskSubmitRequest{
+		UserWallet: req.UserWallet,
+		TaskType:   string(internalTaskType), // Use internal task type
+		SubnetID:   subnetID,
+		ExpiresAt:  &expiresAt,
+		Payload:    payload,
 	}
 
 	// Submit task

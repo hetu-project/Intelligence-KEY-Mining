@@ -11,10 +11,12 @@ type TaskType string
 
 const (
 	TwitterRetweetTask TaskType = "twitter_retweet"
+	TwitterPostTask    TaskType = "twitter_post"
 	DiscordMessageTask TaskType = "discord_message"
 	EmailConfirmTask   TaskType = "email_confirm"
 	// New task types
 	TaskCreationTask TaskType = "task_creation"
+	TelegramTask     TaskType = "telegram_task"
 	// Note: BatchVerificationTask removed - it's an operation, not a task type
 	// Future extended task types
 )
@@ -79,6 +81,29 @@ type TaskCreationPayload struct {
 	TweetID         string `json:"tweet_id"`         // Tweet ID
 }
 
+// TelegramTaskPayload represents Telegram task payload
+type TelegramTaskPayload struct {
+	ProjectName     string `json:"project_name"`     // Project name
+	ProjectIcon     string `json:"project_icon"`     // Project icon URL
+	Description     string `json:"description"`      // Task description
+	TelegramChannel string `json:"telegram_channel"` // Telegram channel/group (@channel or https://t.me/channel)
+	ActionType      string `json:"action_type"`      // Action type (join_channel, share_message, etc.)
+	MessageID       string `json:"message_id"`       // Message ID (optional)
+	TelegramLink    string `json:"telegram_link"`    // Specific Telegram link
+	RequiredAction  string `json:"required_action"`  // Required action description
+}
+
+// TwitterPostTaskPayload represents Twitter post task payload
+type TwitterPostTaskPayload struct {
+	ProjectName    string `json:"project_name"`    // Project name
+	ProjectIcon    string `json:"project_icon"`    // Project icon URL
+	Description    string `json:"description"`     // Task description
+	PostContent    string `json:"post_content"`    // Required post content/template
+	HashTags       string `json:"hash_tags"`       // Required hashtags
+	MentionUsers   string `json:"mention_users"`   // Required @mentions
+	RequiredAction string `json:"required_action"` // Required action description
+}
+
 // BatchVerificationPayload represents batch verification payload
 type BatchVerificationPayload struct {
 	StartTime string `json:"start_time"` // Verification start time
@@ -103,15 +128,31 @@ type MinerOutput struct {
 
 // TaskCreationRequest represents task creation request
 type TaskCreationRequest struct {
-	UserWallet      string    `json:"user_wallet" binding:"required"`
-	TaskType        string    `json:"task_type" binding:"required"` // API task type string
-	ProjectName     string    `json:"project_name" binding:"required"`
-	ProjectIcon     string    `json:"project_icon"`
-	Description     string    `json:"description" binding:"required"`
-	TwitterUsername string    `json:"twitter_username" binding:"required"`
-	TwitterLink     string    `json:"twitter_link" binding:"required"`
-	TweetID         string    `json:"tweet_id" binding:"required"`
-	Deadline        time.Time `json:"deadline" binding:"required"` // Task deadline
+	UserWallet  string    `json:"user_wallet" binding:"required"`
+	TaskType    string    `json:"task_type" binding:"required"` // API task type string
+	ProjectName string    `json:"project_name" binding:"required"`
+	ProjectIcon string    `json:"project_icon"`
+	XURL        string    `json:"x_url"`   // Project X/Twitter URL
+	Website     string    `json:"website"` // Project official website
+	Description string    `json:"description" binding:"required"`
+	Deadline    time.Time `json:"deadline" binding:"required"` // Task deadline
+
+	// Twitter task fields (required when task_type = "twitter_retweet")
+	TwitterUsername string `json:"twitter_username"`
+	TwitterLink     string `json:"twitter_link"`
+	TweetID         string `json:"tweet_id"`
+
+	// Telegram task fields (required when task_type = "telegram_task")
+	TelegramChannel string `json:"telegram_channel"`
+	ActionType      string `json:"action_type"`
+	MessageID       string `json:"message_id"`
+	TelegramLink    string `json:"telegram_link"`
+	RequiredAction  string `json:"required_action"`
+
+	// Twitter post task fields (required when task_type = "twitter_post")
+	PostContent  string `json:"post_content"`
+	HashTags     string `json:"hash_tags"`
+	MentionUsers string `json:"mention_users"`
 }
 
 // TaskCreationResponse represents task creation response

@@ -818,6 +818,59 @@ func (ms *MetadataService) UpdateTwitterID(ctx context.Context, walletAddress, t
 	return nil
 }
 
+// UpdateSocialPlatform updates social platform binding for a user
+func (ms *MetadataService) UpdateSocialPlatform(ctx context.Context, walletAddress, platform, socialID, socialUsername string) error {
+	// Check if user exists
+	var exists bool
+	checkQuery := `SELECT EXISTS(SELECT 1 FROM user_profiles WHERE wallet_address = ?)`
+	err := ms.db.QueryRowContext(ctx, checkQuery, walletAddress).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("failed to check user existence: %v", err)
+	}
+
+	if !exists {
+		return fmt.Errorf("user not found")
+	}
+
+	// Build update query based on platform
+	var updateQuery string
+	var args []interface{}
+
+	switch platform {
+	case "twitter":
+		updateQuery = `UPDATE user_profiles SET twitter_id = ? WHERE wallet_address = ?`
+		args = []interface{}{socialID, walletAddress}
+
+	case "telegram":
+		updateQuery = `UPDATE user_profiles SET telegram_id = ? WHERE wallet_address = ?`
+		args = []interface{}{socialID, walletAddress}
+
+	case "discord":
+		updateQuery = `UPDATE user_profiles SET discord_id = ? WHERE wallet_address = ?`
+		args = []interface{}{socialID, walletAddress}
+
+	default:
+		return fmt.Errorf("unsupported platform: %s", platform)
+	}
+
+	// Execute update
+	result, err := ms.db.ExecContext(ctx, updateQuery, args...)
+	if err != nil {
+		return fmt.Errorf("failed to update %s binding: %v", platform, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %v", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("no rows updated")
+	}
+
+	return nil
+}
+
 // FormatIPFSURI formats IPFS hash as URI (imported from pinata_service)
 func FormatIPFSURI(ipfsHash string) string {
 	return fmt.Sprintf("ipfs://%s", ipfsHash)

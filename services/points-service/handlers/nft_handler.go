@@ -1,7 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/hetu-project/Intelligence-KEY-Mining/services/points-service/models"
@@ -245,6 +248,13 @@ func (nh *NFTHandler) RegisterRoutes(router *gin.RouterGroup) {
 		// NFT and invitation reward endpoints
 		points.POST("/nft-purchase", nh.HandleNFTPurchaseBonus)
 		points.POST("/invitation-reward", nh.HandleInvitationReward)
+		points.POST("/telegram-task-reward", nh.HandleTelegramTaskReward)
+
+		// User completed tasks query
+		points.GET("/completed-tasks/:wallet", nh.GetUserCompletedTasks)
+
+		// Twitter post task reward
+		points.POST("/twitter-post-reward", nh.HandleTwitterPostReward)
 	}
 
 	nft := router.Group("/nft")
@@ -256,4 +266,223 @@ func (nh *NFTHandler) RegisterRoutes(router *gin.RouterGroup) {
 		nft.GET("/cache/stats", nh.GetNFTCacheStats)
 		nft.POST("/cache/clean", nh.CleanExpiredNFTCache)
 	}
+}
+
+// HandleTelegramTaskReward handles Telegram task reward points
+func (nh *NFTHandler) HandleTelegramTaskReward(c *gin.Context) {
+	var req models.TelegramTaskRewardRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid request format: " + err.Error(),
+		})
+		return
+	}
+
+	// Validate required fields
+	if req.UserWallet == "" || req.TaskID == "" || req.TelegramID == "" || req.SubnetID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "user_wallet, task_id, telegram_id, and subnet_id are required",
+		})
+		return
+	}
+
+	// Check if user has already completed a Telegram task for this subnet today
+	today := time.Now().Format("2006-01-02")
+	completed, err := nh.checkUserTelegramTaskToday(c.Request.Context(), req.UserWallet, req.SubnetID, today)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to check daily completion status: " + err.Error(),
+		})
+		return
+	}
+	if completed {
+		c.JSON(http.StatusConflict, gin.H{
+			"success": false,
+			"error":   "User has already completed a Telegram task for this subnet today",
+		})
+		return
+	}
+
+	// Check if user has NFT for bonus calculation
+	hasNFT, err := nh.nftService.CheckUserNFTOwnership(c.Request.Context(), req.UserWallet)
+	if err != nil {
+		// Log error but continue with default points
+		hasNFT = false
+	}
+
+	// Calculate reward points
+	rewardPoints := 1 // Base Telegram task reward
+	if hasNFT {
+		rewardPoints = 2 // Double points for NFT holders
+	}
+
+	// Add points to user
+	err = nh.pointsService.AddDirectPoints(c.Request.Context(), &models.DirectPointsRequest{
+		UserWallet:  req.UserWallet,
+		Points:      rewardPoints,
+		Source:      models.PointsSourceTelegramTask,
+		Description: "Telegram Task Reward",
+		Reference:   req.TaskID,
+		Metadata: map[string]interface{}{
+			"task_id":        req.TaskID,
+			"subnet_id":      req.SubnetID,
+			"telegram_id":    req.TelegramID,
+			"has_nft":        hasNFT,
+			"base_reward":    1,
+			"nft_multiplier": hasNFT,
+			"reward_date":    today,
+		},
+	})
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to add Telegram task reward: " + err.Error(),
+		})
+		return
+	}
+
+	// Get updated user total points (optional, for response)
+	// This could be optimized by returning the new total from AddDirectPoints
+	newTotal := 0 // You might want to query this from the database
+
+	c.JSON(http.StatusOK, &models.TelegramTaskRewardResponse{
+		Success:     true,
+		UserWallet:  req.UserWallet,
+		TaskID:      req.TaskID,
+		SubnetID:    req.SubnetID,
+		PointsAdded: rewardPoints,
+		NewTotal:    newTotal,
+		HasNFT:      hasNFT,
+		Message:     "Telegram task reward added successfully",
+	})
+}
+
+// checkUserTelegramTaskToday checks if user has completed a Telegram task for the subnet today
+func (nh *NFTHandler) checkUserTelegramTaskToday(ctx context.Context, userWallet, subnetID, date string) (bool, error) {
+	// Delegate to pointsService to handle the database check
+	return nh.pointsService.CheckUserTelegramTaskToday(ctx, userWallet, subnetID, date)
+}
+
+// GetUserCompletedTasks handles user completed tasks query
+func (nh *NFTHandler) GetUserCompletedTasks(c *gin.Context) {
+	userWallet := c.Param("wallet")
+	if userWallet == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "wallet address is required",
+		})
+		return
+	}
+
+	// Get query parameters
+	taskType := c.DefaultQuery("task_type", "all")
+	limitStr := c.DefaultQuery("limit", "50")
+	offsetStr := c.DefaultQuery("offset", "0")
+
+	// Parse limit and offset
+	limit := 50
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
+		limit = l
+	}
+
+	offset := 0
+	if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+		offset = o
+	}
+
+	// Get completed tasks
+	tasks, total, err := nh.pointsService.GetUserCompletedTasks(c.Request.Context(), userWallet, taskType, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to get completed tasks: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, &models.UserCompletedTasksResponse{
+		Success: true,
+		Data: models.UserCompletedTasksData{
+			Tasks:  tasks,
+			Total:  total,
+			Limit:  limit,
+			Offset: offset,
+		},
+	})
+}
+
+// HandleTwitterPostReward handles Twitter post task reward points
+func (nh *NFTHandler) HandleTwitterPostReward(c *gin.Context) {
+	var req models.TwitterPostRewardRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid request format: " + err.Error(),
+		})
+		return
+	}
+
+	// Validate required fields
+	if req.UserWallet == "" || req.TaskID == "" || req.PostURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "user_wallet, task_id, and post_url are required",
+		})
+		return
+	}
+
+	// Check if user has NFT for bonus calculation
+	hasNFT, err := nh.nftService.CheckUserNFTOwnership(c.Request.Context(), req.UserWallet)
+	if err != nil {
+		// Log error but continue with default points
+		hasNFT = false
+	}
+
+	// Calculate reward points (no daily limit for Twitter posts as per requirement)
+	rewardPoints := 1 // Base Twitter post reward
+	if hasNFT {
+		rewardPoints = 2 // Double points for NFT holders
+	}
+
+	// Add points to user
+	err = nh.pointsService.AddDirectPoints(c.Request.Context(), &models.DirectPointsRequest{
+		UserWallet:  req.UserWallet,
+		Points:      rewardPoints,
+		Source:      models.PointsSourceTwitterPost,
+		Description: "Twitter Post Task Reward",
+		Reference:   req.TaskID,
+		Metadata: map[string]interface{}{
+			"task_id":        req.TaskID,
+			"post_url":       req.PostURL,
+			"has_nft":        hasNFT,
+			"base_reward":    1,
+			"nft_multiplier": hasNFT,
+		},
+	})
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to add Twitter post reward: " + err.Error(),
+		})
+		return
+	}
+
+	// Get updated user total points (optional, for response)
+	newTotal := 0 // You might want to query this from the database
+
+	c.JSON(http.StatusOK, &models.TwitterPostRewardResponse{
+		Success:     true,
+		UserWallet:  req.UserWallet,
+		TaskID:      req.TaskID,
+		PostURL:     req.PostURL,
+		PointsAdded: rewardPoints,
+		NewTotal:    newTotal,
+		HasNFT:      hasNFT,
+		Message:     "Twitter post reward added successfully",
+	})
 }

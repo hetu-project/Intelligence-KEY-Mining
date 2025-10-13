@@ -400,6 +400,86 @@ func (h *SBTHandler) BindTwitterID(c *gin.Context) {
 	})
 }
 
+// BindSocialPlatform binds a social platform ID to a user's wallet
+// PUT /api/v1/sbt/bind-social/:wallet
+func (h *SBTHandler) BindSocialPlatform(c *gin.Context) {
+	walletAddress := c.Param("wallet")
+
+	// Validate wallet address format
+	if !isValidWalletAddress(walletAddress) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid wallet address",
+			"message": "Wallet address must be a valid Ethereum address",
+		})
+		return
+	}
+
+	var req struct {
+		Platform string `json:"platform" validate:"required"`  // "twitter", "telegram", "discord"
+		SocialID string `json:"social_id" validate:"required"` // Platform-specific user ID
+	}
+
+	// Bind JSON request
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid request format",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	// Validate required fields
+	if req.Platform == "" || req.SocialID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Validation failed",
+			"message": "platform and social_id are required",
+		})
+		return
+	}
+
+	// Validate platform type
+	validPlatforms := map[string]bool{
+		"twitter":  true,
+		"telegram": true,
+		"discord":  true,
+	}
+	if !validPlatforms[req.Platform] {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid platform",
+			"message": "Platform must be 'twitter', 'telegram', or 'discord'",
+		})
+		return
+	}
+
+	// Update social platform binding
+	err := h.metadataService.UpdateSocialPlatform(c.Request.Context(), walletAddress, req.Platform, req.SocialID, "")
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":   "User not found",
+				"message": "User profile not found for the given wallet address",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to bind social platform",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": req.Platform + " account bound successfully",
+		"data": gin.H{
+			"wallet_address": walletAddress,
+			"platform":       req.Platform,
+			"social_id":      req.SocialID,
+		},
+	})
+}
+
 // getContractAddress retrieves contract address
 func (h *SBTHandler) getContractAddress() string {
 	return os.Getenv("SBT_CONTRACT_ADDRESS")

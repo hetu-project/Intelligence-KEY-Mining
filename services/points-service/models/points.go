@@ -8,9 +8,11 @@ import (
 const (
 	PointsSourceTaskCreation      = "Task Creation"
 	PointsSourceTwitterRetweet    = "Twitter Retweet Task"
+	PointsSourceTwitterPost       = "Twitter Post Task"
 	PointsSourceNFTPurchase       = "NFT Purchase Bonus"
 	PointsSourceInvitationReward  = "Invitation Reward"
 	PointsSourceCreatorCommission = "Creator Commission"
+	PointsSourceTelegramTask      = "Telegram Task"
 )
 
 // PointsDistributionRequest points distribution request
@@ -112,4 +114,74 @@ type DirectPointsResponse struct {
 	Source       string `json:"source"`
 	Message      string `json:"message,omitempty"`
 	ErrorMessage string `json:"error_message,omitempty"`
+}
+
+// TelegramTaskRewardRequest represents a Telegram task reward request
+type TelegramTaskRewardRequest struct {
+	UserWallet string `json:"user_wallet" validate:"required"`
+	TaskID     string `json:"task_id" validate:"required"`
+	TelegramID string `json:"telegram_id" validate:"required"`
+	SubnetID   string `json:"subnet_id" validate:"required"`
+}
+
+// TelegramTaskRewardResponse represents a Telegram task reward response
+type TelegramTaskRewardResponse struct {
+	Success      bool   `json:"success"`
+	UserWallet   string `json:"user_wallet"`
+	TaskID       string `json:"task_id"`
+	SubnetID     string `json:"subnet_id"`
+	PointsAdded  int    `json:"points_added"`
+	NewTotal     int    `json:"new_total"`
+	HasNFT       bool   `json:"has_nft"`
+	Message      string `json:"message,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
+}
+
+// TwitterPostRewardRequest represents a Twitter post reward request
+type TwitterPostRewardRequest struct {
+	UserWallet string `json:"user_wallet" validate:"required"`
+	TaskID     string `json:"task_id" validate:"required"`
+	PostURL    string `json:"post_url" validate:"required"` // URL of the posted tweet
+}
+
+// TwitterPostRewardResponse represents a Twitter post reward response
+type TwitterPostRewardResponse struct {
+	Success      bool   `json:"success"`
+	UserWallet   string `json:"user_wallet"`
+	TaskID       string `json:"task_id"`
+	PostURL      string `json:"post_url"`
+	PointsAdded  int    `json:"points_added"`
+	NewTotal     int    `json:"new_total"`
+	HasNFT       bool   `json:"has_nft"`
+	Message      string `json:"message,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
+}
+
+// UserCompletedTask represents a completed task by user
+type UserCompletedTask struct {
+	TaskID       string                 `json:"task_id"`
+	TaskType     string                 `json:"task_type"`
+	Status       string                 `json:"status"`
+	CompletedAt  string                 `json:"completed_at"`
+	PointsEarned int                    `json:"points_earned"`
+	TaskDetails  map[string]interface{} `json:"task_details"`
+	SubnetID     string                 `json:"subnet_id"`
+	SubnetName   string                 `json:"subnet_name"`
+	IsValid      bool                   `json:"is_valid"` // For Twitter tasks with modified links
+}
+
+// UserCompletedTasksResponse represents the response for user completed tasks query
+type UserCompletedTasksResponse struct {
+	Success bool                   `json:"success"`
+	Data    UserCompletedTasksData `json:"data"`
+	Message string                 `json:"message,omitempty"`
+	Error   string                 `json:"error,omitempty"`
+}
+
+// UserCompletedTasksData represents the data structure for completed tasks
+type UserCompletedTasksData struct {
+	Tasks  []UserCompletedTask `json:"tasks"`
+	Total  int                 `json:"total"`
+	Limit  int                 `json:"limit"`
+	Offset int                 `json:"offset"`
 }
