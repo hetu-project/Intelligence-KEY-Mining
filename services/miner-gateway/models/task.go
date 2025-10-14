@@ -95,13 +95,11 @@ type TelegramTaskPayload struct {
 
 // TwitterPostTaskPayload represents Twitter post task payload
 type TwitterPostTaskPayload struct {
-	ProjectName    string `json:"project_name"`    // Project name
-	ProjectIcon    string `json:"project_icon"`    // Project icon URL
-	Description    string `json:"description"`     // Task description
-	PostContent    string `json:"post_content"`    // Required post content/template
-	HashTags       string `json:"hash_tags"`       // Required hashtags
-	MentionUsers   string `json:"mention_users"`   // Required @mentions
-	RequiredAction string `json:"required_action"` // Required action description
+	ProjectName string `json:"project_name"` // Project name
+	ProjectIcon string `json:"project_icon"` // Project icon URL
+	Description string `json:"description"`  // Task description
+	PostID      string `json:"post_id"`      // Required post ID
+	PostLink    string `json:"post_link"`    // Required post link
 }
 
 // BatchVerificationPayload represents batch verification payload
@@ -150,9 +148,8 @@ type TaskCreationRequest struct {
 	RequiredAction  string `json:"required_action"`
 
 	// Twitter post task fields (required when task_type = "twitter_post")
-	PostContent  string `json:"post_content"`
-	HashTags     string `json:"hash_tags"`
-	MentionUsers string `json:"mention_users"`
+	PostID   string `json:"post_id"`   // Required post ID
+	PostLink string `json:"post_link"` // Required post link
 }
 
 // TaskCreationResponse represents task creation response
