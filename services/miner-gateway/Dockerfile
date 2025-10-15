@@ -14,11 +14,11 @@ WORKDIR /app
 # Copy go mod files first for better caching
 COPY go.mod go.sum ./
 
+# Copy pkg directory first (needed for local replace before go mod download)
+COPY pkg/ ./pkg/
+
 # Download dependencies with cache mount
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
-
-# Copy pkg directory (needed for local replace)
-COPY pkg/ ./pkg/
 
 # Copy only the miner-gateway service source code
 COPY services/miner-gateway/ ./services/miner-gateway/
