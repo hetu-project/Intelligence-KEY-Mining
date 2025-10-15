@@ -46,6 +46,9 @@ func main() {
 	verifierRegistry.RegisterVerifier("task_creation", verifiers.NewTaskCreationVerifier())
 	// Register TwitterVerifier for payload validation only (actual verification is done by TwitterVerificationService)
 	verifierRegistry.RegisterVerifier("twitter_retweet", verifiers.NewTwitterVerifier("", ""))
+	// Register verifiers for new task types
+	verifierRegistry.RegisterVerifier("twitter_post", verifiers.NewTwitterVerifier("", ""))
+	verifierRegistry.RegisterVerifier("telegram_task", verifiers.NewTaskCreationVerifier())
 
 	// 4. Initialize services
 	vlcService := services.NewVLCService()
