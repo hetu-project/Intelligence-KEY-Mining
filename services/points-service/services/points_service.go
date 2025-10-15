@@ -53,6 +53,21 @@ func (ps *PointsService) CheckUserTelegramTaskToday(ctx context.Context, userWal
 	return count > 0, nil
 }
 
+// HasUserCompletedTwitterPostTaskToday checks if user has completed a Twitter post task today
+func (ps *PointsService) HasUserCompletedTwitterPostTaskToday(ctx context.Context, userWallet, subnetID string) (bool, error) {
+	date := time.Now().Format("2006-01-02")
+	query := `SELECT COUNT(*) FROM points_history WHERE wallet_address = ? AND source = ? AND DATE(created_at) = ? AND subnet_id = ?`
+
+	var count int
+	err := ps.db.QueryRowContext(ctx, query,
+		userWallet, models.PointsSourceTwitterPost, date, subnetID).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
+
 // GetUserCompletedTasks gets completed tasks for a user
 func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, taskType string, limit, offset int) ([]models.UserCompletedTask, int, error) {
 	// Build query with optional task type filter

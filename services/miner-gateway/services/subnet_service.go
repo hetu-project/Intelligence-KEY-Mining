@@ -24,6 +24,7 @@ func NewSubnetService(db *sql.DB) *SubnetService {
 }
 
 // FindOrCreateSubnet finds existing subnet by name or creates a new one
+// Restriction: Each user can only create one subnet
 func (ss *SubnetService) FindOrCreateSubnet(ctx context.Context, req *models.SubnetCreateRequest) (*models.Subnet, error) {
 	// First, try to find existing subnet by name
 	existing, err := ss.GetSubnetByName(ctx, req.Name)
@@ -34,6 +35,16 @@ func (ss *SubnetService) FindOrCreateSubnet(ctx context.Context, req *models.Sub
 	if existing != nil {
 		log.Printf("Found existing subnet: %s (ID: %s)", existing.Name, existing.ID)
 		return existing, nil
+	}
+
+	// Check if user already has a subnet (one subnet per user limit)
+	userSubnet, err := ss.GetSubnetByCreator(ctx, req.CreatorWallet)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("error checking user's existing subnet: %v", err)
+	}
+
+	if userSubnet != nil {
+		return nil, fmt.Errorf("user %s already has a subnet: %s. Each user can only create one subnet", req.CreatorWallet, userSubnet.Name)
 	}
 
 	// Create new subnet
@@ -108,6 +119,38 @@ func (ss *SubnetService) GetSubnetByName(ctx context.Context, name string) (*mod
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get subnet by name: %v", err)
+	}
+
+	return &subnet, nil
+}
+
+// GetSubnetByCreator gets subnet by creator wallet address
+func (ss *SubnetService) GetSubnetByCreator(ctx context.Context, creatorWallet string) (*models.Subnet, error) {
+	query := `
+		SELECT id, name, icon, x_url, website, creator_wallet, created_at, updated_at, status
+		FROM subnets 
+		WHERE creator_wallet = ? AND status = 'active'
+		LIMIT 1
+	`
+
+	var subnet models.Subnet
+	err := ss.db.QueryRowContext(ctx, query, creatorWallet).Scan(
+		&subnet.ID,
+		&subnet.Name,
+		&subnet.Icon,
+		&subnet.XURL,
+		&subnet.Website,
+		&subnet.CreatorWallet,
+		&subnet.CreatedAt,
+		&subnet.UpdatedAt,
+		&subnet.Status,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, err
+		}
+		return nil, fmt.Errorf("failed to get subnet by creator: %v", err)
 	}
 
 	return &subnet, nil

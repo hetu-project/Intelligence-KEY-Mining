@@ -1,0 +1,60 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+miner-gateway
+main
+
+# Test files
+*_test.go
+testdata/
+
+# Documentation
+*.md
+docs/
+
+# Node.js (if any)
+node_modules/
+npm-debug.log
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Other services (we only need miner-gateway)
+../validator/
+../points-service/
+../sbt-service/
+
+# Docker files
+Dockerfile*
+docker-compose*
+
+# Environment files
+.env*
+
+# Large directories that aren't needed
+tests/
+scripts/
+poc/
+parallelnet/
+contracts/
+vlc/
+models/
+dgraph/

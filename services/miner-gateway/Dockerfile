@@ -11,20 +11,25 @@ RUN apk add --no-cache git ca-certificates tzdata
 # Set working directory
 WORKDIR /app
 
-# Copy go mod files
+# Copy go mod files first for better caching
 COPY go.mod go.sum ./
 
-# Copy pkg directory first (needed for local replace)
+# Download dependencies with cache mount
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+
+# Copy pkg directory (needed for local replace)
 COPY pkg/ ./pkg/
 
-# Download dependencies
-RUN go mod download
+# Copy only the miner-gateway service source code
+COPY services/miner-gateway/ ./services/miner-gateway/
 
-# Copy source code
-COPY . .
-
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main ./services/miner-gateway
+# Build the application with optimizations and cache
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-w -s" \
+    -trimpath \
+    -o main ./services/miner-gateway
 
 # Runtime stage
 FROM alpine:latest

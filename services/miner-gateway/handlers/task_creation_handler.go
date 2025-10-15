@@ -166,20 +166,23 @@ func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 		}
 
 	case models.TwitterPostTask:
-		// Validate required Twitter post fields
-		if req.PostID == "" || req.PostLink == "" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"success": false,
-				"message": "Twitter post task requires post_id and post_link",
-			})
-			return
+		// Set default values for Twitter post fields if empty
+		postID := req.PostID
+		if postID == "" {
+			postID = "default_post_" + fmt.Sprintf("%d", time.Now().Unix())
 		}
+
+		postLink := req.PostLink
+		if postLink == "" {
+			postLink = "https://x.com/default/status/" + postID
+		}
+
 		payload = map[string]interface{}{
 			"project_name": req.ProjectName,
 			"project_icon": req.ProjectIcon,
 			"description":  req.Description,
-			"post_id":      req.PostID,
-			"post_link":    req.PostLink,
+			"post_id":      postID,
+			"post_link":    postLink,
 			"subnet_id":    subnetID,
 		}
 
