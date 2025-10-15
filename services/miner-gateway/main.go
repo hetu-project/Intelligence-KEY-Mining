@@ -18,6 +18,7 @@ import (
 	"github.com/hetu-project/Intelligence-KEY-Mining/services/miner-gateway/config"
 	"github.com/hetu-project/Intelligence-KEY-Mining/services/miner-gateway/handlers"
 	"github.com/hetu-project/Intelligence-KEY-Mining/services/miner-gateway/middleware"
+	"github.com/hetu-project/Intelligence-KEY-Mining/services/miner-gateway/models"
 	"github.com/hetu-project/Intelligence-KEY-Mining/services/miner-gateway/services"
 	"github.com/hetu-project/Intelligence-KEY-Mining/services/miner-gateway/verifiers"
 )
@@ -47,8 +48,8 @@ func main() {
 	// Register TwitterVerifier for payload validation only (actual verification is done by TwitterVerificationService)
 	verifierRegistry.RegisterVerifier("twitter_retweet", verifiers.NewTwitterVerifier("", ""))
 	// Register verifiers for new task types
-	verifierRegistry.RegisterVerifier("twitter_post", verifiers.NewTwitterVerifier("", ""))
-	verifierRegistry.RegisterVerifier("telegram_task", verifiers.NewTaskCreationVerifier())
+	verifierRegistry.RegisterVerifier("twitter_post", verifiers.NewGenericVerifier(models.TwitterPostTask))
+	verifierRegistry.RegisterVerifier("telegram_task", verifiers.NewGenericVerifier(models.TelegramTask))
 
 	// 4. Initialize services
 	vlcService := services.NewVLCService()
