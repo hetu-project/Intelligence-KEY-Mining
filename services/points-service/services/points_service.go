@@ -3,10 +3,10 @@ package services
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/hetu-project/Intelligence-KEY-Mining/services/points-service/models"
@@ -80,10 +80,14 @@ func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, 
 		switch taskType {
 		case "twitter_retweet":
 			source = models.PointsSourceTwitterRetweet
+		case "twitter_post":
+			source = "Twitter Post Task"
 		case "telegram_task":
-			source = models.PointsSourceTelegramTask
+			source = "Telegram Task"
 		case "task_creation":
 			source = models.PointsSourceTaskCreation
+		case "vlc_distribution":
+			source = "VLC Distribution"
 		default:
 			return nil, 0, fmt.Errorf("unsupported task type: %s", taskType)
 		}
@@ -91,16 +95,24 @@ func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, 
 		args = append(args, source)
 	}
 
-	// Query for completed tasks from points_history
+	// Query for completed tasks from points_history with subnet info
 	query := fmt.Sprintf(`
 		SELECT 
-			COALESCE(ph.task_id, '') as task_id,
+			COALESCE(ph.tx_ref, '') as task_id,
 			ph.source,
 			'completed' as status,
 			ph.date,
 			ph.points,
-			'{}' as metadata
+			COALESCE(t.subnet_id, '') as subnet_id,
+			COALESCE(s.name, '') as subnet_name
 		FROM points_history ph
+		LEFT JOIN tasks t ON (
+			CASE 
+				WHEN ph.tx_ref LIKE 'pocw-consensus-%%' THEN SUBSTRING(ph.tx_ref, 16)
+				ELSE ph.tx_ref
+			END = t.id
+		)
+		LEFT JOIN subnets s ON t.subnet_id = s.id
 		%s
 		ORDER BY ph.date DESC
 		LIMIT ? OFFSET ?
@@ -117,19 +129,27 @@ func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, 
 	var tasks []models.UserCompletedTask
 	for rows.Next() {
 		var task models.UserCompletedTask
-		var metadataJSON string
 		var source string
+		var rawTaskID string
 
 		err := rows.Scan(
-			&task.TaskID,
+			&rawTaskID,
 			&source,
 			&task.Status,
 			&task.CompletedAt,
 			&task.PointsEarned,
-			&metadataJSON,
+			&task.SubnetID,
+			&task.SubnetName,
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan task: %v", err)
+		}
+
+		// Extract actual task ID from tx_ref
+		if strings.HasPrefix(rawTaskID, "pocw-consensus-") {
+			task.TaskID = strings.TrimPrefix(rawTaskID, "pocw-consensus-")
+		} else {
+			task.TaskID = rawTaskID
 		}
 
 		// Map source to task type
@@ -140,18 +160,20 @@ func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, 
 			task.TaskType = "telegram_task"
 		case models.PointsSourceTaskCreation:
 			task.TaskType = "task_creation"
+		case models.PointsSourceTwitterPost:
+			task.TaskType = "twitter_post"
+		case "Twitter Post Task":
+			task.TaskType = "twitter_post"
+		case "Telegram Task":
+			task.TaskType = "telegram_task"
+		case "VLC Distribution":
+			task.TaskType = "vlc_distribution"
 		default:
 			task.TaskType = "unknown"
 		}
 
-		// Parse metadata
-		var metadata map[string]interface{}
-		if err := json.Unmarshal([]byte(metadataJSON), &metadata); err == nil {
-			task.TaskDetails = metadata
-			if subnetID, ok := metadata["subnet_id"].(string); ok {
-				task.SubnetID = subnetID
-			}
-		}
+		// Set empty task details for now
+		task.TaskDetails = make(map[string]interface{})
 
 		// For now, assume all tasks are valid (Twitter link modification check would require miner-gateway integration)
 		task.IsValid = true
