@@ -148,49 +148,82 @@ func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, err
 			s.name as subnet_name,
 			s.icon as subnet_icon,
 			s.creator_wallet,
+			-- Total tasks: count all tasks in this subnet
 			COUNT(DISTINCT t.id) as total_tasks,
-			COUNT(DISTINCT CASE WHEN utc.points_earned > 0 THEN t.id END) as completed_tasks,
-			COUNT(DISTINCT utc.user_wallet) as unique_users,
-			COALESCE(SUM(COALESCE(max_points.max_points, utc.points_earned)), 0) as total_points_distributed,
-			COALESCE(SUM(CASE WHEN DATE(utc.completed_at) = CURDATE() THEN COALESCE(max_points_today.max_points, utc.points_earned) ELSE 0 END), 0) as today_points_distributed,
-			COUNT(DISTINCT CASE WHEN DATE(utc.completed_at) = CURDATE() THEN utc.user_wallet END) as today_active_users
+			-- Completed tasks: count tasks that have points distributed (from points_history)
+			COALESCE((
+				SELECT COUNT(DISTINCT 
+					CASE 
+						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+						ELSE ph.tx_ref
+					END
+				)
+				FROM points_history ph 
+				LEFT JOIN tasks t2 ON (
+					CASE 
+						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+						ELSE ph.tx_ref
+					END = t2.id
+				)
+				WHERE t2.subnet_id = s.id 
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
+			), 0) as completed_tasks,
+			-- Unique users: count all users who got points for this subnet
+			COALESCE((
+				SELECT COUNT(DISTINCT ph.wallet_address)
+				FROM points_history ph 
+				LEFT JOIN tasks t2 ON (
+					CASE 
+						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+						ELSE ph.tx_ref
+					END = t2.id
+				)
+				WHERE t2.subnet_id = s.id 
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
+			), 0) as unique_users,
+			-- Total points distributed: sum all points for this subnet
+			COALESCE((
+				SELECT SUM(ph.points) 
+				FROM points_history ph 
+				LEFT JOIN tasks t2 ON (
+					CASE 
+						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+						ELSE ph.tx_ref
+					END = t2.id
+				)
+				WHERE t2.subnet_id = s.id 
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
+			), 0) as total_points_distributed,
+			-- Today points distributed: sum today's points for this subnet
+			COALESCE((
+				SELECT SUM(ph.points) 
+				FROM points_history ph 
+				LEFT JOIN tasks t2 ON (
+					CASE 
+						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+						ELSE ph.tx_ref
+					END = t2.id
+				)
+				WHERE t2.subnet_id = s.id 
+				AND DATE(ph.created_at) = CURDATE()
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
+			), 0) as today_points_distributed,
+			-- Today active users: count users who got points today for this subnet
+			COALESCE((
+				SELECT COUNT(DISTINCT ph.wallet_address)
+				FROM points_history ph 
+				LEFT JOIN tasks t2 ON (
+					CASE 
+						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+						ELSE ph.tx_ref
+					END = t2.id
+				)
+				WHERE t2.subnet_id = s.id 
+				AND DATE(ph.created_at) = CURDATE()
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
+			), 0) as today_active_users
 		FROM subnets s
 		LEFT JOIN tasks t ON s.id = t.subnet_id
-		LEFT JOIN user_task_completions utc ON t.id = utc.task_id
-		LEFT JOIN (
-			SELECT 
-				ph.wallet_address,
-				CASE 
-					WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
-					ELSE ph.tx_ref
-				END as task_id,
-				MAX(ph.points) as max_points
-			FROM points_history ph 
-			WHERE ph.tx_ref IS NOT NULL 
-			AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
-			GROUP BY ph.wallet_address, 
-				CASE 
-					WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
-					ELSE ph.tx_ref
-				END
-		) max_points ON max_points.task_id = utc.task_id AND max_points.wallet_address = utc.user_wallet
-		LEFT JOIN (
-			SELECT 
-				ph.wallet_address,
-				CASE 
-					WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
-					ELSE ph.tx_ref
-				END as task_id,
-				MAX(ph.points) as max_points
-			FROM points_history ph 
-			WHERE ph.tx_ref IS NOT NULL AND DATE(ph.created_at) = CURDATE()
-			AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
-			GROUP BY ph.wallet_address, 
-				CASE 
-					WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
-					ELSE ph.tx_ref
-				END
-		) max_points_today ON max_points_today.task_id = utc.task_id AND max_points_today.wallet_address = utc.user_wallet
 		WHERE s.status = 'active'
 		GROUP BY s.id, s.name, s.icon, s.creator_wallet
 		ORDER BY total_points_distributed DESC
@@ -234,15 +267,82 @@ func (ss *StatsService) GetSubnetDetails(ctx context.Context, subnetID string) (
 			s.name as subnet_name,
 			s.icon as subnet_icon,
 			s.creator_wallet,
+			-- Total tasks: count all tasks in this subnet
 			COUNT(DISTINCT t.id) as total_tasks,
-			COUNT(DISTINCT CASE WHEN utc.points_earned > 0 THEN t.id END) as completed_tasks,
-			COUNT(DISTINCT utc.user_wallet) as unique_users,
-			COALESCE(SUM(utc.points_earned), 0) as total_points_distributed,
-			COALESCE(SUM(CASE WHEN DATE(utc.completed_at) = CURDATE() THEN utc.points_earned ELSE 0 END), 0) as today_points_distributed,
-			COUNT(DISTINCT CASE WHEN DATE(utc.completed_at) = CURDATE() THEN utc.user_wallet END) as today_active_users
+			-- Completed tasks: count tasks that have points distributed (from points_history)
+			COALESCE((
+				SELECT COUNT(DISTINCT 
+					CASE 
+						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+						ELSE ph.tx_ref
+					END
+				)
+				FROM points_history ph 
+				LEFT JOIN tasks t2 ON (
+					CASE 
+						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+						ELSE ph.tx_ref
+					END = t2.id
+				)
+				WHERE t2.subnet_id = s.id 
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
+			), 0) as completed_tasks,
+			-- Unique users: count all users who got points for this subnet
+			COALESCE((
+				SELECT COUNT(DISTINCT ph.wallet_address)
+				FROM points_history ph 
+				LEFT JOIN tasks t2 ON (
+					CASE 
+						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+						ELSE ph.tx_ref
+					END = t2.id
+				)
+				WHERE t2.subnet_id = s.id 
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
+			), 0) as unique_users,
+			-- Total points distributed: sum all points for this subnet
+			COALESCE((
+				SELECT SUM(ph.points) 
+				FROM points_history ph 
+				LEFT JOIN tasks t2 ON (
+					CASE 
+						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+						ELSE ph.tx_ref
+					END = t2.id
+				)
+				WHERE t2.subnet_id = s.id 
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
+			), 0) as total_points_distributed,
+			-- Today points distributed: sum today's points for this subnet
+			COALESCE((
+				SELECT SUM(ph.points) 
+				FROM points_history ph 
+				LEFT JOIN tasks t2 ON (
+					CASE 
+						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+						ELSE ph.tx_ref
+					END = t2.id
+				)
+				WHERE t2.subnet_id = s.id 
+				AND DATE(ph.created_at) = CURDATE()
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
+			), 0) as today_points_distributed,
+			-- Today active users: count users who got points today for this subnet
+			COALESCE((
+				SELECT COUNT(DISTINCT ph.wallet_address)
+				FROM points_history ph 
+				LEFT JOIN tasks t2 ON (
+					CASE 
+						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+						ELSE ph.tx_ref
+					END = t2.id
+				)
+				WHERE t2.subnet_id = s.id 
+				AND DATE(ph.created_at) = CURDATE()
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
+			), 0) as today_active_users
 		FROM subnets s
 		LEFT JOIN tasks t ON s.id = t.subnet_id
-		LEFT JOIN user_task_completions utc ON t.id = utc.task_id
 		WHERE s.status = 'active' AND s.id = ?
 		GROUP BY s.id, s.name, s.icon, s.creator_wallet
 	`
