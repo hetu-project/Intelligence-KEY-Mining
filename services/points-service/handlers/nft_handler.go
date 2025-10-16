@@ -345,6 +345,10 @@ func (nh *NFTHandler) HandleTelegramTaskReward(c *gin.Context) {
 		return
 	}
 
+	// TODO: Create user_task_completions record for statistics
+	// This should be done to ensure the task appears in subnet statistics
+	// For now, we'll add a note that this needs to be implemented
+
 	// Get updated user total points (optional, for response)
 	// This could be optimized by returning the new total from AddDirectPoints
 	newTotal := 0 // You might want to query this from the database
@@ -471,6 +475,10 @@ func (nh *NFTHandler) HandleTwitterPostReward(c *gin.Context) {
 		})
 		return
 	}
+
+	// TODO: Create user_task_completions record for statistics
+	// This should be done to ensure the task appears in subnet statistics
+	// For now, we'll add a note that this needs to be implemented
 
 	// Get updated user total points (optional, for response)
 	newTotal := 0 // You might want to query this from the database

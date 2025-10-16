@@ -160,20 +160,36 @@ func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, err
 		LEFT JOIN (
 			SELECT 
 				ph.wallet_address,
-				SUBSTRING(ph.tx_ref, 16) as task_id,
+				CASE 
+					WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+					ELSE ph.tx_ref
+				END as task_id,
 				MAX(ph.points) as max_points
 			FROM points_history ph 
-			WHERE ph.tx_ref LIKE 'pocw-consensus-%'
-			GROUP BY ph.wallet_address, SUBSTRING(ph.tx_ref, 16)
+			WHERE ph.tx_ref IS NOT NULL 
+			AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
+			GROUP BY ph.wallet_address, 
+				CASE 
+					WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+					ELSE ph.tx_ref
+				END
 		) max_points ON max_points.task_id = utc.task_id AND max_points.wallet_address = utc.user_wallet
 		LEFT JOIN (
 			SELECT 
 				ph.wallet_address,
-				SUBSTRING(ph.tx_ref, 16) as task_id,
+				CASE 
+					WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+					ELSE ph.tx_ref
+				END as task_id,
 				MAX(ph.points) as max_points
 			FROM points_history ph 
-			WHERE ph.tx_ref LIKE 'pocw-consensus-%' AND DATE(ph.created_at) = CURDATE()
-			GROUP BY ph.wallet_address, SUBSTRING(ph.tx_ref, 16)
+			WHERE ph.tx_ref IS NOT NULL AND DATE(ph.created_at) = CURDATE()
+			AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
+			GROUP BY ph.wallet_address, 
+				CASE 
+					WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+					ELSE ph.tx_ref
+				END
 		) max_points_today ON max_points_today.task_id = utc.task_id AND max_points_today.wallet_address = utc.user_wallet
 		WHERE s.status = 'active'
 		GROUP BY s.id, s.name, s.icon, s.creator_wallet
@@ -576,11 +592,19 @@ func (ss *StatsService) GetSubnetUserRanking(ctx context.Context, subnetID strin
 			LEFT JOIN (
 				SELECT 
 					ph.wallet_address,
-					SUBSTRING(ph.tx_ref, 16) as task_id,
+					CASE 
+						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+						ELSE ph.tx_ref
+					END as task_id,
 					MAX(ph.points) as max_points
 				FROM points_history ph 
-				WHERE ph.tx_ref LIKE 'pocw-consensus-%'
-				GROUP BY ph.wallet_address, SUBSTRING(ph.tx_ref, 16)
+				WHERE ph.tx_ref IS NOT NULL 
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
+				GROUP BY ph.wallet_address, 
+					CASE 
+						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+						ELSE ph.tx_ref
+					END
 			) max_points ON max_points.task_id = utc.task_id AND max_points.wallet_address = utc.user_wallet
 			WHERE utc.subnet_id = ?
 			GROUP BY utc.user_wallet

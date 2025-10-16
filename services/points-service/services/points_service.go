@@ -39,8 +39,8 @@ func (ps *PointsService) CheckUserTelegramTaskToday(ctx context.Context, userWal
 		FROM points_history 
 		WHERE wallet_address = ? 
 		  AND source = ? 
-		  AND DATE(record_date) = ?
-		  AND JSON_EXTRACT(metadata, '$.subnet_id') = ?
+		  AND DATE(date) = ?
+		  AND task_id IN (SELECT id FROM tasks WHERE subnet_id = ?)
 	`
 
 	var count int
@@ -97,12 +97,12 @@ func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, 
 			COALESCE(ph.task_id, '') as task_id,
 			ph.source,
 			'completed' as status,
-			ph.record_date,
+			ph.date,
 			ph.points,
-			COALESCE(ph.metadata, '{}') as metadata
+			'{}' as metadata
 		FROM points_history ph
 		%s
-		ORDER BY ph.record_date DESC
+		ORDER BY ph.date DESC
 		LIMIT ? OFFSET ?
 	`, whereClause)
 
