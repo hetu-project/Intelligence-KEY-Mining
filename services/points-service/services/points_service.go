@@ -81,9 +81,9 @@ func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, 
 		case "twitter_retweet":
 			source = models.PointsSourceTwitterRetweet
 		case "twitter_post":
-			source = "Twitter Post Task"
+			source = models.PointsSourceTwitterPost
 		case "telegram_task":
-			source = "Telegram Task"
+			source = models.PointsSourceTelegramTask
 		case "task_creation":
 			source = models.PointsSourceTaskCreation
 		case "vlc_distribution":
@@ -162,10 +162,6 @@ func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, 
 			task.TaskType = "task_creation"
 		case models.PointsSourceTwitterPost:
 			task.TaskType = "twitter_post"
-		case "Twitter Post Task":
-			task.TaskType = "twitter_post"
-		case "Telegram Task":
-			task.TaskType = "telegram_task"
 		case "VLC Distribution":
 			task.TaskType = "vlc_distribution"
 		default:
