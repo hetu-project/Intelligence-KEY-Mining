@@ -98,12 +98,3 @@ type SubnetResponse struct {
 	CreatedAt     time.Time `json:"created_at"`
 	Status        string    `json:"status"`
 }
-
-// PointsSource constants for points history
-const (
-	PointsSourceTaskCreation     = "Task Creation"
-	PointsSourceTwitterRetweet   = "Twitter Retweet Task"
-	PointsSourceNFTPurchase      = "NFT Purchase Bonus"
-	PointsSourceInvitationReward = "Invitation Reward"
-	PointsSourceVLCDistribution  = "VLC Distribution"
-)

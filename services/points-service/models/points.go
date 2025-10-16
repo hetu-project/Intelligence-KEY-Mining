@@ -9,6 +9,7 @@ const (
 	PointsSourceTaskCreation      = "Task Creation"
 	PointsSourceTwitterRetweet    = "Twitter Retweet Task"
 	PointsSourceTwitterPost       = "Twitter Post Task"
+	PointsSourceVLCDistribution   = "VLC Distribution"
 	PointsSourceNFTPurchase       = "NFT Purchase Bonus"
 	PointsSourceInvitationReward  = "Invitation Reward"
 	PointsSourceCreatorCommission = "Creator Commission"

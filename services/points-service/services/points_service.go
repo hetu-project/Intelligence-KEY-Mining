@@ -79,15 +79,13 @@ func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, 
 		var source string
 		switch taskType {
 		case "twitter_retweet":
-			source = models.PointsSourceTwitterRetweet
+			source = models.PointsSourceVLCDistribution // twitter_retweet tasks generate VLC Distribution points
 		case "twitter_post":
 			source = models.PointsSourceTwitterPost
 		case "telegram_task":
 			source = models.PointsSourceTelegramTask
 		case "task_creation":
 			source = models.PointsSourceTaskCreation
-		case "vlc_distribution":
-			source = "VLC Distribution"
 		default:
 			return nil, 0, fmt.Errorf("unsupported task type: %s", taskType)
 		}
@@ -154,16 +152,14 @@ func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, 
 
 		// Map source to task type
 		switch source {
-		case models.PointsSourceTwitterRetweet:
-			task.TaskType = "twitter_retweet"
+		case models.PointsSourceVLCDistribution:
+			task.TaskType = "twitter_retweet" // VLC Distribution comes from twitter_retweet tasks
 		case models.PointsSourceTelegramTask:
 			task.TaskType = "telegram_task"
 		case models.PointsSourceTaskCreation:
 			task.TaskType = "task_creation"
 		case models.PointsSourceTwitterPost:
 			task.TaskType = "twitter_post"
-		case "VLC Distribution":
-			task.TaskType = "vlc_distribution"
 		default:
 			task.TaskType = "unknown"
 		}
