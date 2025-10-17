@@ -93,7 +93,7 @@ func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, 
 		args = append(args, source)
 	}
 
-	// Query for completed tasks from points_history with subnet info
+	// Query for completed tasks from points_history with subnet info and modification check
 	query := fmt.Sprintf(`
 		SELECT 
 			COALESCE(ph.tx_ref, '') as task_id,
@@ -102,7 +102,9 @@ func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, 
 			ph.date,
 			ph.points,
 			COALESCE(t.subnet_id, '') as subnet_id,
-			COALESCE(s.name, '') as subnet_name
+			COALESCE(s.name, '') as subnet_name,
+			ph.created_at as completed_at,
+			t.link_modified_at
 		FROM points_history ph
 		LEFT JOIN tasks t ON (
 			CASE 
@@ -129,6 +131,8 @@ func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, 
 		var task models.UserCompletedTask
 		var source string
 		var rawTaskID string
+		var completedAt time.Time
+		var linkModifiedAt sql.NullTime
 
 		err := rows.Scan(
 			&rawTaskID,
@@ -138,6 +142,8 @@ func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, 
 			&task.PointsEarned,
 			&task.SubnetID,
 			&task.SubnetName,
+			&completedAt,
+			&linkModifiedAt,
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan task: %v", err)
@@ -167,8 +173,8 @@ func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, 
 		// Set empty task details for now
 		task.TaskDetails = make(map[string]interface{})
 
-		// For now, assume all tasks are valid (Twitter link modification check would require miner-gateway integration)
-		task.IsValid = true
+		// Check if task is still valid by comparing completion time with link modification time
+		task.IsValid = ps.isTaskCompletionStillValid(source, completedAt, linkModifiedAt)
 
 		tasks = append(tasks, task)
 	}
@@ -558,4 +564,21 @@ func (ps *PointsService) addPointsRecord(ctx context.Context, record *models.Poi
 	)
 
 	return err
+}
+
+// isTaskCompletionStillValid checks if a task completion is still valid
+func (ps *PointsService) isTaskCompletionStillValid(source string, completedAt time.Time, linkModifiedAt sql.NullTime) bool {
+	// For non-VLC Distribution (non-Twitter retweet) tasks, assume they are valid
+	if source != "VLC Distribution" {
+		return true
+	}
+
+	// For Twitter retweet tasks (VLC Distribution), check if link was modified after completion
+	if !linkModifiedAt.Valid {
+		// No modification recorded, task is still valid
+		return true
+	}
+
+	// If link was modified after the user completed the task, it's invalid
+	return completedAt.After(linkModifiedAt.Time)
 }

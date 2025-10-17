@@ -736,7 +736,7 @@ func (ts *TaskService) UpdateTwitterLink(ctx context.Context, userWallet, oldTwe
 		return fmt.Errorf("task is currently being processed")
 	}
 
-	// 4. Update the task payload
+	// 4. Update the task payload and mark link modification time
 	updateQuery := `
 		UPDATE tasks 
 		SET payload = JSON_SET(
@@ -744,6 +744,7 @@ func (ts *TaskService) UpdateTwitterLink(ctx context.Context, userWallet, oldTwe
 			'$.tweet_id', ?,
 			'$.twitter_link', ?
 		),
+		link_modified_at = CURRENT_TIMESTAMP,
 		updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
 	`
