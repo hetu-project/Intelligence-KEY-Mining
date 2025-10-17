@@ -9,8 +9,8 @@ type Subnet struct {
 	ID            string    `json:"id" db:"id"`
 	Name          string    `json:"name" db:"name"`
 	Icon          string    `json:"icon" db:"icon"`
-	XURL          string    `json:"x_url" db:"x_url"`     // Project X/Twitter URL
-	Website       string    `json:"website" db:"website"` // Project official website
+	XURL          *string   `json:"x_url" db:"x_url"`     // Project X/Twitter URL
+	Website       *string   `json:"website" db:"website"` // Project official website
 	CreatorWallet string    `json:"creator_wallet" db:"creator_wallet"`
 	CreatedAt     time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at" db:"updated_at"`

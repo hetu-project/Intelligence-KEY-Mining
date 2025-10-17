@@ -58,6 +58,14 @@ func (ss *SubnetService) FindOrCreateSubnet(ctx context.Context, req *models.Sub
 		UpdatedAt:     time.Now(),
 	}
 
+	// Set optional fields if provided
+	if req.XURL != "" {
+		subnet.XURL = &req.XURL
+	}
+	if req.Website != "" {
+		subnet.Website = &req.Website
+	}
+
 	err = ss.CreateSubnet(ctx, subnet)
 	if err != nil {
 		return nil, fmt.Errorf("error creating subnet: %v", err)
@@ -74,12 +82,21 @@ func (ss *SubnetService) CreateSubnet(ctx context.Context, subnet *models.Subnet
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
+	// Convert pointers to interface{} for database insertion
+	var xurl, website interface{}
+	if subnet.XURL != nil {
+		xurl = *subnet.XURL
+	}
+	if subnet.Website != nil {
+		website = *subnet.Website
+	}
+
 	_, err := ss.db.ExecContext(ctx, query,
 		subnet.ID,
 		subnet.Name,
 		subnet.Icon,
-		subnet.XURL,
-		subnet.Website,
+		xurl,
+		website,
 		subnet.CreatorWallet,
 		subnet.CreatedAt,
 		subnet.UpdatedAt,
@@ -102,17 +119,26 @@ func (ss *SubnetService) GetSubnetByName(ctx context.Context, name string) (*mod
 	`
 
 	var subnet models.Subnet
+	var xurl, website sql.NullString
 	err := ss.db.QueryRowContext(ctx, query, name).Scan(
 		&subnet.ID,
 		&subnet.Name,
 		&subnet.Icon,
-		&subnet.XURL,
-		&subnet.Website,
+		&xurl,
+		&website,
 		&subnet.CreatorWallet,
 		&subnet.CreatedAt,
 		&subnet.UpdatedAt,
 		&subnet.Status,
 	)
+
+	// Convert NullString to pointer
+	if xurl.Valid {
+		subnet.XURL = &xurl.String
+	}
+	if website.Valid {
+		subnet.Website = &website.String
+	}
 
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -134,17 +160,26 @@ func (ss *SubnetService) GetSubnetByCreator(ctx context.Context, creatorWallet s
 	`
 
 	var subnet models.Subnet
+	var xurl, website sql.NullString
 	err := ss.db.QueryRowContext(ctx, query, creatorWallet).Scan(
 		&subnet.ID,
 		&subnet.Name,
 		&subnet.Icon,
-		&subnet.XURL,
-		&subnet.Website,
+		&xurl,
+		&website,
 		&subnet.CreatorWallet,
 		&subnet.CreatedAt,
 		&subnet.UpdatedAt,
 		&subnet.Status,
 	)
+
+	// Convert NullString to pointer
+	if xurl.Valid {
+		subnet.XURL = &xurl.String
+	}
+	if website.Valid {
+		subnet.Website = &website.String
+	}
 
 	if err != nil {
 		if err == sql.ErrNoRows {
