@@ -662,11 +662,18 @@ func (ss *StatsService) GetUserSubnetSummary(ctx context.Context, userWallet str
 
 // GetSubnetUserRanking gets user ranking by points in a specific subnet
 func (ss *StatsService) GetSubnetUserRanking(ctx context.Context, subnetID string, limit, offset int) ([]*SubnetUserRank, int, error) {
-	// Get total count of users in this subnet first
+	// Get total count of users in this subnet from points_history
 	countQuery := `
-		SELECT COUNT(DISTINCT utc.user_wallet) 
-		FROM user_task_completions utc 
-		WHERE utc.subnet_id = ?
+		SELECT COUNT(DISTINCT ph.wallet_address)
+		FROM points_history ph 
+		LEFT JOIN tasks t ON (
+			CASE 
+				WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+				ELSE ph.tx_ref
+			END = t.id
+		)
+		WHERE t.subnet_id = ?
+		AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
 	`
 	var totalCount int
 	err := ss.db.QueryRowContext(ctx, countQuery, subnetID).Scan(&totalCount)
@@ -674,7 +681,7 @@ func (ss *StatsService) GetSubnetUserRanking(ctx context.Context, subnetID strin
 		return nil, 0, fmt.Errorf("failed to get subnet users count: %v", err)
 	}
 
-	// Get user ranking with proper handling of duplicate points_history records
+	// Get user ranking based on points_history
 	query := `
 		SELECT 
 			ranked_users.user_wallet,
@@ -684,30 +691,25 @@ func (ss *StatsService) GetSubnetUserRanking(ctx context.Context, subnetID strin
 			ranked_users.user_rank
 		FROM (
 			SELECT 
-				utc.user_wallet,
-				COALESCE(SUM(COALESCE(max_points.max_points, utc.points_earned)), SUM(utc.points_earned)) as total_points,
-				COUNT(DISTINCT utc.task_id) as completed_tasks,
-				ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(COALESCE(max_points.max_points, utc.points_earned)), SUM(utc.points_earned)) DESC) as user_rank
-			FROM user_task_completions utc
-			LEFT JOIN (
-				SELECT 
-					ph.wallet_address,
-					CASE 
-						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
-						ELSE ph.tx_ref
-					END as task_id,
-					MAX(ph.points) as max_points
-				FROM points_history ph 
-				WHERE ph.tx_ref IS NOT NULL 
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
-				GROUP BY ph.wallet_address, 
+				ph.wallet_address as user_wallet,
+				SUM(ph.points) as total_points,
+				COUNT(DISTINCT 
 					CASE 
 						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
 						ELSE ph.tx_ref
 					END
-			) max_points ON max_points.task_id = utc.task_id AND max_points.wallet_address = utc.user_wallet
-			WHERE utc.subnet_id = ?
-			GROUP BY utc.user_wallet
+				) as completed_tasks,
+				ROW_NUMBER() OVER (ORDER BY SUM(ph.points) DESC) as user_rank
+			FROM points_history ph 
+			LEFT JOIN tasks t ON (
+				CASE 
+					WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+					ELSE ph.tx_ref
+				END = t.id
+			)
+			WHERE t.subnet_id = ?
+			AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
+			GROUP BY ph.wallet_address
 		) ranked_users
 		LEFT JOIN user_profiles up ON ranked_users.user_wallet = up.wallet_address
 		ORDER BY ranked_users.user_rank
