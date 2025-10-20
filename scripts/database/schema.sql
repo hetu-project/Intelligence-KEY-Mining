@@ -650,6 +650,20 @@ CREATE TABLE IF NOT EXISTS subnets (
     FOREIGN KEY (creator_wallet) REFERENCES user_profiles(wallet_address) ON DELETE CASCADE
 );
 
+-- Whitelist users - 白名单用户（可创建多个子网）
+CREATE TABLE IF NOT EXISTS whitelist_users (
+    wallet_address VARCHAR(42) PRIMARY KEY COMMENT 'User wallet address',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'When user was added to whitelist',
+    created_by VARCHAR(42) NOT NULL COMMENT 'Admin who added this user',
+    reason VARCHAR(500) NULL COMMENT 'Reason for whitelisting',
+    status ENUM('active', 'inactive') DEFAULT 'active' COMMENT 'Whitelist status',
+    
+    INDEX idx_status (status),
+    INDEX idx_created_at (created_at),
+    
+    FOREIGN KEY (wallet_address) REFERENCES user_profiles(wallet_address) ON DELETE CASCADE
+);
+
 -- User task completions - 防重复完成任务
 CREATE TABLE IF NOT EXISTS user_task_completions (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,

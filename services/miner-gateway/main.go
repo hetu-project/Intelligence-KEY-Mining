@@ -121,7 +121,7 @@ func main() {
 	healthHandler := handlers.NewHealthHandler(db)
 
 	// 5. Setup routes
-	router := setupRoutes(taskHandler, taskCreationHandler, batchVerificationHandler, healthHandler, enhancedVLCService, roundCoordinator)
+	router := setupRoutes(taskHandler, taskCreationHandler, batchVerificationHandler, healthHandler, enhancedVLCService, roundCoordinator, db, subnetService)
 
 	// 6. Start server
 	srv := &http.Server{
@@ -165,6 +165,8 @@ func setupRoutes(
 	healthHandler *handlers.HealthHandler,
 	enhancedVLCService *services.EnhancedVLCService,
 	roundCoordinator *services.RoundCoordinator,
+	db *sql.DB,
+	subnetService *services.SubnetService,
 ) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -226,6 +228,24 @@ func setupRoutes(
 			taskCreation.GET("/user/:wallet", taskCreationHandler.ListUserTaskCreations)
 			taskCreation.GET("/stats", taskCreationHandler.GetTaskCreationStats)
 			taskCreation.PUT("/update-twitter-link", taskCreationHandler.UpdateTwitterLink)
+		}
+
+		// Whitelist management (admin endpoints)
+		whitelistService := services.NewWhitelistService(db)
+		whitelistHandler := handlers.NewWhitelistHandler(whitelistService)
+		whitelist := v1.Group("/admin/whitelist")
+		{
+			whitelist.POST("/add", whitelistHandler.AddWhitelistUser)
+			whitelist.DELETE("/remove", whitelistHandler.RemoveWhitelistUser)
+			whitelist.GET("/users", whitelistHandler.GetWhitelistUsers)
+			whitelist.GET("/check/:wallet", whitelistHandler.CheckWhitelistStatus)
+		}
+
+		// Subnet management
+		subnetHandler := handlers.NewSubnetHandler(subnetService)
+		subnets := v1.Group("/subnets")
+		{
+			subnets.POST("/:subnet_id/transfer", subnetHandler.TransferSubnet)
 		}
 
 		// Batch verification operations (temporarily disabled - will be redesigned in step 4)

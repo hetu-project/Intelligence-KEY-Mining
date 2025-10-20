@@ -13,13 +13,16 @@ import (
 
 // SubnetService manages subnet operations
 type SubnetService struct {
-	db *sql.DB
+	db               *sql.DB
+	whitelistService *WhitelistService
 }
 
 // NewSubnetService creates a new subnet service
 func NewSubnetService(db *sql.DB) *SubnetService {
+	whitelistService := NewWhitelistService(db)
 	return &SubnetService{
-		db: db,
+		db:               db,
+		whitelistService: whitelistService,
 	}
 }
 
@@ -37,14 +40,25 @@ func (ss *SubnetService) FindOrCreateSubnet(ctx context.Context, req *models.Sub
 		return existing, nil
 	}
 
-	// Check if user already has a subnet (one subnet per user limit)
-	userSubnet, err := ss.GetSubnetByCreator(ctx, req.CreatorWallet)
-	if err != nil && err != sql.ErrNoRows {
-		return nil, fmt.Errorf("error checking user's existing subnet: %v", err)
+	// Check if user is whitelisted (whitelisted users can create multiple subnets)
+	isWhitelisted, err := ss.whitelistService.IsUserWhitelisted(ctx, req.CreatorWallet)
+	if err != nil {
+		log.Printf("Warning: Failed to check whitelist status for user %s: %v", req.CreatorWallet, err)
+		isWhitelisted = false // Default to not whitelisted if check fails
 	}
 
-	if userSubnet != nil {
-		return nil, fmt.Errorf("user %s already has a subnet: %s. Each user can only create one subnet", req.CreatorWallet, userSubnet.Name)
+	// If user is not whitelisted, enforce one subnet per user limit
+	if !isWhitelisted {
+		userSubnet, err := ss.GetSubnetByCreator(ctx, req.CreatorWallet)
+		if err != nil && err != sql.ErrNoRows {
+			return nil, fmt.Errorf("error checking user's existing subnet: %v", err)
+		}
+
+		if userSubnet != nil {
+			return nil, fmt.Errorf("user %s already has a subnet: %s. Each user can only create one subnet", req.CreatorWallet, userSubnet.Name)
+		}
+	} else {
+		log.Printf("User %s is whitelisted, allowing multiple subnet creation", req.CreatorWallet)
 	}
 
 	// Create new subnet
@@ -406,4 +420,69 @@ func (ss *SubnetService) GetSubnetUsersCount(ctx context.Context, subnetID strin
 	}
 
 	return count, nil
+}
+
+// TransferSubnet transfers subnet ownership to another user
+func (ss *SubnetService) TransferSubnet(ctx context.Context, subnetID, currentOwner, newOwner string) error {
+	// Begin transaction
+	tx, err := ss.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	// Verify current owner
+	var currentCreator string
+	checkQuery := `SELECT creator_wallet FROM subnets WHERE id = ? AND status = 'active'`
+	err = tx.QueryRowContext(ctx, checkQuery, subnetID).Scan(&currentCreator)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("subnet not found or inactive")
+		}
+		return fmt.Errorf("failed to verify subnet ownership: %v", err)
+	}
+
+	if currentCreator != currentOwner {
+		return fmt.Errorf("only the current owner can transfer the subnet")
+	}
+
+	// Verify new owner exists in user_profiles
+	var userExists int
+	userCheckQuery := `SELECT COUNT(*) FROM user_profiles WHERE wallet_address = ?`
+	err = tx.QueryRowContext(ctx, userCheckQuery, newOwner).Scan(&userExists)
+	if err != nil {
+		return fmt.Errorf("failed to verify new owner: %v", err)
+	}
+
+	if userExists == 0 {
+		return fmt.Errorf("new owner wallet address not found in user profiles")
+	}
+
+	// Update subnet creator_wallet
+	updateQuery := `
+		UPDATE subnets 
+		SET creator_wallet = ?, updated_at = CURRENT_TIMESTAMP 
+		WHERE id = ? AND creator_wallet = ?
+	`
+	result, err := tx.ExecContext(ctx, updateQuery, newOwner, subnetID, currentOwner)
+	if err != nil {
+		return fmt.Errorf("failed to transfer subnet: %v", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %v", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("subnet transfer failed: no rows updated")
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	log.Printf("Subnet %s transferred from %s to %s", subnetID, currentOwner, newOwner)
+	return nil
 }
