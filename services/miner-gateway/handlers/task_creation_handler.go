@@ -225,6 +225,7 @@ func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 	taskCreationResponse := &models.TaskCreationResponse{
 		Success:  response.Success,
 		TaskID:   response.TaskID,
+		SubnetID: subnetID,
 		Message:  response.Message,
 		VLCValue: response.VLCValue,
 	}

@@ -156,6 +156,7 @@ type TaskCreationRequest struct {
 type TaskCreationResponse struct {
 	Success  bool   `json:"success"`
 	TaskID   string `json:"task_id,omitempty"`
+	SubnetID string `json:"subnet_id,omitempty"` // Subnet ID
 	Message  string `json:"message"`
 	VLCValue int    `json:"vlc_value,omitempty"` // Current VLC value
 }
