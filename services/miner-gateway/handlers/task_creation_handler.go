@@ -93,8 +93,10 @@ func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 		subnetReq := &models.SubnetCreateRequest{
 			Name:          req.ProjectName,
 			Icon:          req.ProjectIcon,
-			XURL:          req.XURL,    // New field for X/Twitter URL
-			Website:       req.Website, // New field for official website
+			XURL:          req.XURL,      // New field for X/Twitter URL
+			Website:       req.Website,   // New field for official website
+			TVL:           req.TVL,       // Total Value Locked in USD
+			Valuation:     req.Valuation, // Project Valuation in USD
 			CreatorWallet: req.UserWallet,
 		}
 

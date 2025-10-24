@@ -637,6 +637,8 @@ CREATE TABLE IF NOT EXISTS subnets (
     icon VARCHAR(500) NULL,
     x_url VARCHAR(500) NULL COMMENT 'Project X/Twitter URL',
     website VARCHAR(500) NULL COMMENT 'Project official website',
+    tvl DECIMAL(15,2) DEFAULT 0.00 COMMENT 'Total Value Locked in USD',
+    valuation DECIMAL(15,2) DEFAULT 0.00 COMMENT 'Project Valuation in USD',
     creator_wallet VARCHAR(42) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

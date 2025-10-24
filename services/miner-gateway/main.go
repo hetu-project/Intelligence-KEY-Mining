@@ -246,6 +246,7 @@ func setupRoutes(
 		subnets := v1.Group("/subnets")
 		{
 			subnets.POST("/:subnet_id/transfer", subnetHandler.TransferSubnet)
+			subnets.PUT("/:subnet_id/financial", subnetHandler.UpdateSubnetFinancialData)
 		}
 
 		// Batch verification operations (temporarily disabled - will be redesigned in step 4)

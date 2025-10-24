@@ -4,7 +4,9 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/hetu-project/Intelligence-KEY-Mining/services/miner-gateway/models"
 	"github.com/hetu-project/Intelligence-KEY-Mining/services/miner-gateway/services"
+	"github.com/hetu-project/Intelligence-KEY-Mining/services/miner-gateway/utils"
 )
 
 // SubnetHandler handles subnet-related requests
@@ -61,6 +63,49 @@ func (sh *SubnetHandler) TransferSubnet(c *gin.Context) {
 			"subnet_id":     subnetID,
 			"current_owner": req.CurrentOwner,
 			"new_owner":     req.NewOwner,
+		},
+	})
+}
+
+// UpdateSubnetFinancialData updates TVL and Valuation for a subnet
+func (sh *SubnetHandler) UpdateSubnetFinancialData(c *gin.Context) {
+	subnetID := c.Param("subnet_id")
+	if subnetID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Subnet ID is required",
+		})
+		return
+	}
+
+	var req models.SubnetFinancialUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid request: " + err.Error(),
+		})
+		return
+	}
+
+	err := sh.subnetService.UpdateSubnetFinancialData(c.Request.Context(), subnetID, &req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to update subnet financial data: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Subnet financial data updated successfully",
+		"data": gin.H{
+			"subnet_id":           subnetID,
+			"tvl":                 req.TVL,
+			"valuation":           req.Valuation,
+			"tvl_formatted":       utils.FormatFinancialValue(req.TVL),
+			"valuation_formatted": utils.FormatFinancialValue(req.Valuation),
+			"updated_by":          req.CurrentOwner,
 		},
 	})
 }

@@ -66,6 +66,8 @@ func (ss *SubnetService) FindOrCreateSubnet(ctx context.Context, req *models.Sub
 		ID:            uuid.New().String(),
 		Name:          req.Name,
 		Icon:          req.Icon,
+		TVL:           req.TVL,
+		Valuation:     req.Valuation,
 		CreatorWallet: req.CreatorWallet,
 		Status:        "active",
 		CreatedAt:     time.Now(),
@@ -92,8 +94,8 @@ func (ss *SubnetService) FindOrCreateSubnet(ctx context.Context, req *models.Sub
 // CreateSubnet creates a new subnet
 func (ss *SubnetService) CreateSubnet(ctx context.Context, subnet *models.Subnet) error {
 	query := `
-		INSERT INTO subnets (id, name, icon, x_url, website, creator_wallet, created_at, updated_at, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO subnets (id, name, icon, x_url, website, tvl, valuation, creator_wallet, created_at, updated_at, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	// Convert pointers to interface{} for database insertion
@@ -111,6 +113,8 @@ func (ss *SubnetService) CreateSubnet(ctx context.Context, subnet *models.Subnet
 		subnet.Icon,
 		xurl,
 		website,
+		subnet.TVL,
+		subnet.Valuation,
 		subnet.CreatorWallet,
 		subnet.CreatedAt,
 		subnet.UpdatedAt,
@@ -127,7 +131,7 @@ func (ss *SubnetService) CreateSubnet(ctx context.Context, subnet *models.Subnet
 // GetSubnetByName gets subnet by name
 func (ss *SubnetService) GetSubnetByName(ctx context.Context, name string) (*models.Subnet, error) {
 	query := `
-		SELECT id, name, icon, x_url, website, creator_wallet, created_at, updated_at, status
+		SELECT id, name, icon, x_url, website, tvl, valuation, creator_wallet, created_at, updated_at, status
 		FROM subnets 
 		WHERE name = ? AND status = 'active'
 	`
@@ -140,6 +144,8 @@ func (ss *SubnetService) GetSubnetByName(ctx context.Context, name string) (*mod
 		&subnet.Icon,
 		&xurl,
 		&website,
+		&subnet.TVL,
+		&subnet.Valuation,
 		&subnet.CreatorWallet,
 		&subnet.CreatedAt,
 		&subnet.UpdatedAt,
@@ -167,7 +173,7 @@ func (ss *SubnetService) GetSubnetByName(ctx context.Context, name string) (*mod
 // GetSubnetByCreator gets subnet by creator wallet address
 func (ss *SubnetService) GetSubnetByCreator(ctx context.Context, creatorWallet string) (*models.Subnet, error) {
 	query := `
-		SELECT id, name, icon, x_url, website, creator_wallet, created_at, updated_at, status
+		SELECT id, name, icon, x_url, website, tvl, valuation, creator_wallet, created_at, updated_at, status
 		FROM subnets 
 		WHERE creator_wallet = ? AND status = 'active'
 		LIMIT 1
@@ -181,6 +187,8 @@ func (ss *SubnetService) GetSubnetByCreator(ctx context.Context, creatorWallet s
 		&subnet.Icon,
 		&xurl,
 		&website,
+		&subnet.TVL,
+		&subnet.Valuation,
 		&subnet.CreatorWallet,
 		&subnet.CreatedAt,
 		&subnet.UpdatedAt,
@@ -484,5 +492,71 @@ func (ss *SubnetService) TransferSubnet(ctx context.Context, subnetID, currentOw
 	}
 
 	log.Printf("Subnet %s transferred from %s to %s", subnetID, currentOwner, newOwner)
+	return nil
+}
+
+// UpdateSubnetFinancialData updates TVL and Valuation for a subnet
+func (ss *SubnetService) UpdateSubnetFinancialData(ctx context.Context, subnetID string, req *models.SubnetFinancialUpdateRequest) error {
+	// Begin transaction
+	tx, err := ss.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	// Verify current owner and get current data
+	var currentCreator string
+	checkQuery := `SELECT creator_wallet FROM subnets WHERE id = ? AND status = 'active'`
+	err = tx.QueryRowContext(ctx, checkQuery, subnetID).Scan(&currentCreator)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("subnet not found or inactive")
+		}
+		return fmt.Errorf("failed to verify subnet ownership: %v", err)
+	}
+
+	// Check if user is the creator or whitelisted
+	canModify := false
+	if currentCreator == req.CurrentOwner {
+		canModify = true
+	} else {
+		// Check if user is whitelisted
+		isWhitelisted, err := ss.whitelistService.IsUserWhitelisted(ctx, req.CurrentOwner)
+		if err != nil {
+			log.Printf("Warning: Failed to check whitelist status for user %s: %v", req.CurrentOwner, err)
+		}
+		canModify = isWhitelisted
+	}
+
+	if !canModify {
+		return fmt.Errorf("only the subnet creator or whitelisted users can modify financial data")
+	}
+
+	// Update financial data
+	updateQuery := `
+		UPDATE subnets 
+		SET tvl = ?, valuation = ?, updated_at = CURRENT_TIMESTAMP 
+		WHERE id = ? AND status = 'active'
+	`
+	result, err := tx.ExecContext(ctx, updateQuery, req.TVL, req.Valuation, subnetID)
+	if err != nil {
+		return fmt.Errorf("failed to update subnet financial data: %v", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %v", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("subnet financial data update failed: no rows updated")
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	log.Printf("Subnet %s financial data updated by %s (TVL: %.2f, Valuation: %.2f)", subnetID, req.CurrentOwner, req.TVL, req.Valuation)
 	return nil
 }

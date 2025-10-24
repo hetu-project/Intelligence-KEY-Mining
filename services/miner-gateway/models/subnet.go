@@ -9,8 +9,10 @@ type Subnet struct {
 	ID            string    `json:"id" db:"id"`
 	Name          string    `json:"name" db:"name"`
 	Icon          string    `json:"icon" db:"icon"`
-	XURL          *string   `json:"x_url" db:"x_url"`     // Project X/Twitter URL
-	Website       *string   `json:"website" db:"website"` // Project official website
+	XURL          *string   `json:"x_url" db:"x_url"`         // Project X/Twitter URL
+	Website       *string   `json:"website" db:"website"`     // Project official website
+	TVL           float64   `json:"tvl" db:"tvl"`             // Total Value Locked in USD
+	Valuation     float64   `json:"valuation" db:"valuation"` // Project Valuation in USD
 	CreatorWallet string    `json:"creator_wallet" db:"creator_wallet"`
 	CreatedAt     time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at" db:"updated_at"`
@@ -80,21 +82,34 @@ type InvitationReward struct {
 
 // SubnetCreateRequest represents subnet creation request
 type SubnetCreateRequest struct {
-	Name          string `json:"project_name" validate:"required,max=200"`
-	Icon          string `json:"project_icon" validate:"url,max=500"`
-	XURL          string `json:"x_url" validate:"omitempty,url,max=500"`   // Project X/Twitter URL
-	Website       string `json:"website" validate:"omitempty,url,max=500"` // Project official website
-	CreatorWallet string `json:"creator_wallet" validate:"required"`
+	Name          string  `json:"project_name" validate:"required,max=200"`
+	Icon          string  `json:"project_icon" validate:"url,max=500"`
+	XURL          string  `json:"x_url" validate:"omitempty,url,max=500"`   // Project X/Twitter URL
+	Website       string  `json:"website" validate:"omitempty,url,max=500"` // Project official website
+	TVL           float64 `json:"tvl" validate:"omitempty,min=0"`           // Total Value Locked in USD
+	Valuation     float64 `json:"valuation" validate:"omitempty,min=0"`     // Project Valuation in USD
+	CreatorWallet string  `json:"creator_wallet" validate:"required"`
 }
 
 // SubnetResponse represents subnet response
 type SubnetResponse struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Icon          string    `json:"icon"`
-	XURL          string    `json:"x_url"`   // Project X/Twitter URL
-	Website       string    `json:"website"` // Project official website
-	CreatorWallet string    `json:"creator_wallet"`
-	CreatedAt     time.Time `json:"created_at"`
-	Status        string    `json:"status"`
+	ID                 string    `json:"id"`
+	Name               string    `json:"name"`
+	Icon               string    `json:"icon"`
+	XURL               string    `json:"x_url"`               // Project X/Twitter URL
+	Website            string    `json:"website"`             // Project official website
+	TVL                float64   `json:"tvl"`                 // Total Value Locked in USD (raw value)
+	Valuation          float64   `json:"valuation"`           // Project Valuation in USD (raw value)
+	TVLFormatted       string    `json:"tvl_formatted"`       // Formatted TVL for display (e.g., "1.5M")
+	ValuationFormatted string    `json:"valuation_formatted"` // Formatted Valuation for display (e.g., "2.3B")
+	CreatorWallet      string    `json:"creator_wallet"`
+	CreatedAt          time.Time `json:"created_at"`
+	Status             string    `json:"status"`
+}
+
+// SubnetFinancialUpdateRequest represents subnet financial data update request
+type SubnetFinancialUpdateRequest struct {
+	TVL          float64 `json:"tvl" validate:"min=0"`             // Total Value Locked in USD
+	Valuation    float64 `json:"valuation" validate:"min=0"`       // Project Valuation in USD
+	CurrentOwner string  `json:"current_owner" binding:"required"` // Current owner for permission check
 }

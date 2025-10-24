@@ -130,8 +130,10 @@ type TaskCreationRequest struct {
 	TaskType    string    `json:"task_type" binding:"required"` // API task type string
 	ProjectName string    `json:"project_name" binding:"required"`
 	ProjectIcon string    `json:"project_icon"`
-	XURL        string    `json:"x_url"`   // Project X/Twitter URL
-	Website     string    `json:"website"` // Project official website
+	XURL        string    `json:"x_url"`     // Project X/Twitter URL
+	Website     string    `json:"website"`   // Project official website
+	TVL         float64   `json:"tvl"`       // Total Value Locked in USD
+	Valuation   float64   `json:"valuation"` // Project Valuation in USD
 	Description string    `json:"description" binding:"required"`
 	Deadline    time.Time `json:"deadline" binding:"required"` // Task deadline
 
