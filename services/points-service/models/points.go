@@ -14,6 +14,7 @@ const (
 	PointsSourceInvitationReward  = "Invitation Reward"
 	PointsSourceCreatorCommission = "Creator Commission"
 	PointsSourceTelegramTask      = "Telegram Task"
+	PointsSourceChatTask          = "Chat Task"
 )
 
 // PointsDistributionRequest points distribution request
@@ -66,6 +67,7 @@ type PointsRecord struct {
 	Source        string    `json:"source" db:"source"` // "VLC Distribution"
 	Points        int       `json:"points" db:"points"`
 	TxRef         string    `json:"tx_ref,omitempty" db:"tx_ref"` // Batch ID as reference
+	SubnetID      string    `json:"subnet_id,omitempty" db:"subnet_id"`
 	CreatedAt     time.Time `json:"created_at" db:"created_at"`
 }
 
@@ -103,6 +105,7 @@ type DirectPointsRequest struct {
 	Source      string                 `json:"source" validate:"required"`
 	Description string                 `json:"description,omitempty"`
 	Reference   string                 `json:"reference,omitempty"` // Transaction hash, invitation code, etc.
+	SubnetID    string                 `json:"subnet_id,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
 
@@ -185,4 +188,22 @@ type UserCompletedTasksData struct {
 	Total  int                 `json:"total"`
 	Limit  int                 `json:"limit"`
 	Offset int                 `json:"offset"`
+}
+
+// ChatTaskRewardRequest represents a Chat task reward request
+type ChatTaskRewardRequest struct {
+	UserWallet string `json:"user_wallet" validate:"required"`
+	SubnetID   string `json:"subnet_id" validate:"required"`
+}
+
+// ChatTaskRewardResponse represents a Chat task reward response
+type ChatTaskRewardResponse struct {
+	Success      bool   `json:"success"`
+	UserWallet   string `json:"user_wallet"`
+	SubnetID     string `json:"subnet_id"`
+	PointsAdded  int    `json:"points_added"`
+	NewTotal     int    `json:"new_total"`
+	HasNFT       bool   `json:"has_nft"`
+	Message      string `json:"message,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
 }

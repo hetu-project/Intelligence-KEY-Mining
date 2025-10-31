@@ -86,6 +86,8 @@ func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, 
 			source = models.PointsSourceTelegramTask
 		case "task_creation":
 			source = models.PointsSourceTaskCreation
+		case "chat":
+			source = models.PointsSourceChatTask
 		default:
 			return nil, 0, fmt.Errorf("unsupported task type: %s", taskType)
 		}
@@ -166,6 +168,8 @@ func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, 
 			task.TaskType = "task_creation"
 		case models.PointsSourceTwitterPost:
 			task.TaskType = "twitter_post"
+		case models.PointsSourceChatTask:
+			task.TaskType = "chat"
 		default:
 			task.TaskType = "unknown"
 		}
@@ -480,6 +484,59 @@ func (ps *PointsService) GetConfig() *models.PointsConfig {
 	return ps.config
 }
 
+// GetSubnetCreator gets the creator wallet address for a subnet
+func (ps *PointsService) GetSubnetCreator(ctx context.Context, subnetID string) (string, error) {
+	var creatorWallet string
+	query := `SELECT creator_wallet FROM subnets WHERE id = ? AND status = 'active'`
+
+	err := ps.db.QueryRowContext(ctx, query, subnetID).Scan(&creatorWallet)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", fmt.Errorf("subnet not found or inactive")
+		}
+		return "", fmt.Errorf("failed to query subnet creator: %v", err)
+	}
+
+	return creatorWallet, nil
+}
+
+// GetAccumulatedCommission gets the accumulated commission for a creator
+func (ps *PointsService) GetAccumulatedCommission(ctx context.Context, creatorWallet string) (float64, error) {
+	query := `SELECT accumulated_commission FROM creator_commission_accumulation WHERE creator_wallet = ?`
+	var accumulated float64
+	err := ps.db.QueryRowContext(ctx, query, creatorWallet).Scan(&accumulated)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0.0, nil // No previous accumulation
+		}
+		return 0.0, fmt.Errorf("failed to query accumulated commission: %v", err)
+	}
+	return accumulated, nil
+}
+
+// UpdateAccumulatedCommission updates the accumulated commission for a creator
+func (ps *PointsService) UpdateAccumulatedCommission(ctx context.Context, creatorWallet string, newAccumulated float64, distributedPoints int) error {
+	query := `
+		INSERT INTO creator_commission_accumulation (creator_wallet, accumulated_commission, total_distributed)
+		VALUES (?, ?, ?)
+		ON DUPLICATE KEY UPDATE 
+		accumulated_commission = ?,
+		total_distributed = total_distributed + ?,
+		last_updated = CURRENT_TIMESTAMP
+	`
+
+	_, err := ps.db.ExecContext(ctx, query,
+		creatorWallet, newAccumulated, distributedPoints,
+		newAccumulated, distributedPoints,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to update accumulated commission: %v", err)
+	}
+
+	return nil
+}
+
 // AddDirectPoints adds points directly to a user (for NFT bonuses, invitations, etc.)
 func (ps *PointsService) AddDirectPoints(ctx context.Context, req *models.DirectPointsRequest) error {
 	log.Printf("Adding %d points directly to user %s (source: %s)", req.Points, req.UserWallet, req.Source)
@@ -497,6 +554,7 @@ func (ps *PointsService) AddDirectPoints(ctx context.Context, req *models.Direct
 		Source:        req.Source,
 		Points:        req.Points,
 		TxRef:         req.Reference,
+		SubnetID:      req.SubnetID,
 		CreatedAt:     time.Now(),
 	}
 
@@ -550,8 +608,8 @@ func (ps *PointsService) ensureUserExists(ctx context.Context, userWallet string
 // addPointsRecord adds a points record to the database
 func (ps *PointsService) addPointsRecord(ctx context.Context, record *models.PointsRecord) error {
 	query := `
-		INSERT INTO points_history (wallet_address, date, source, points, tx_ref, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO points_history (wallet_address, date, source, points, tx_ref, subnet_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`
 
 	_, err := ps.db.ExecContext(ctx, query,
@@ -560,6 +618,7 @@ func (ps *PointsService) addPointsRecord(ctx context.Context, record *models.Poi
 		record.Source,
 		record.Points,
 		record.TxRef,
+		record.SubnetID,
 		record.CreatedAt,
 	)
 
@@ -581,4 +640,121 @@ func (ps *PointsService) isTaskCompletionStillValid(source string, completedAt t
 
 	// If link was modified after the user completed the task, it's invalid
 	return completedAt.After(linkModifiedAt.Time)
+}
+
+// CheckUserChatTaskToday checks if user has completed a chat task for the subnet today
+func (ps *PointsService) CheckUserChatTaskToday(ctx context.Context, userWallet, subnetID, date string) (bool, error) {
+	query := `
+		SELECT COUNT(*) 
+		FROM points_history 
+		WHERE wallet_address = ? 
+		  AND source = ? 
+		  AND DATE(created_at) = ?
+		  AND subnet_id = ?
+	`
+
+	var count int
+	err := ps.db.QueryRowContext(ctx, query,
+		userWallet, models.PointsSourceChatTask, date, subnetID).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
+
+// GetUserChatScore gets user's total chat task points
+func (ps *PointsService) GetUserChatScore(ctx context.Context, userWallet string) (map[string]interface{}, error) {
+	query := `
+		SELECT 
+			COALESCE(SUM(points), 0) as total_points,
+			COUNT(*) as tasks_count,
+			COUNT(DISTINCT subnet_id) as subnets_count
+		FROM points_history
+		WHERE wallet_address = ? 
+		AND source = ?
+	`
+
+	var totalPoints, tasksCount, subnetsCount int
+	err := ps.db.QueryRowContext(ctx, query,
+		userWallet,
+		models.PointsSourceChatTask,
+	).Scan(&totalPoints, &tasksCount, &subnetsCount)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chat score: %v", err)
+	}
+
+	return map[string]interface{}{
+		"user_wallet":          userWallet,
+		"chat_total_points":    totalPoints,
+		"chat_tasks_count":     tasksCount,
+		"participated_subnets": subnetsCount,
+	}, nil
+}
+
+// GetUserTodayEarnings gets user's today earnings breakdown
+func (ps *PointsService) GetUserTodayEarnings(ctx context.Context, userWallet string) (map[string]interface{}, error) {
+	query := `
+		SELECT 
+			source,
+			SUM(points) as points
+		FROM points_history
+		WHERE wallet_address = ? 
+		AND DATE(created_at) = CURDATE()
+		GROUP BY source
+	`
+
+	rows, err := ps.db.QueryContext(ctx, query, userWallet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get today's earnings: %v", err)
+	}
+	defer rows.Close()
+
+	breakdown := make(map[string]int)
+	totalPoints := 0
+
+	for rows.Next() {
+		var source string
+		var points int
+		if err := rows.Scan(&source, &points); err != nil {
+			continue
+		}
+
+		// Map source to simplified name
+		simpleName := mapSourceToSimpleName(source)
+		breakdown[simpleName] = points
+		totalPoints += points
+	}
+
+	return map[string]interface{}{
+		"user_wallet":        userWallet,
+		"today_total_points": totalPoints,
+		"breakdown":          breakdown,
+		"date":               time.Now().Format("2006-01-02"),
+	}, nil
+}
+
+// mapSourceToSimpleName maps point source to simplified name
+func mapSourceToSimpleName(source string) string {
+	switch source {
+	case models.PointsSourceChatTask:
+		return "chat"
+	case models.PointsSourceTwitterPost:
+		return "twitter_post"
+	case models.PointsSourceVLCDistribution:
+		return "twitter_retweet"
+	case models.PointsSourceTelegramTask:
+		return "telegram_task"
+	case models.PointsSourceTaskCreation:
+		return "task_creation"
+	case models.PointsSourceCreatorCommission:
+		return "creator_commission"
+	case models.PointsSourceInvitationReward:
+		return "invitation"
+	case models.PointsSourceNFTPurchase:
+		return "nft_purchase"
+	default:
+		return "other"
+	}
 }

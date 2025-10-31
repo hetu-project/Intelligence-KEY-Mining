@@ -2,6 +2,9 @@ package handlers
 
 import (
 	"context"
+	"fmt"
+	"log"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -241,6 +244,108 @@ func (nh *NFTHandler) CleanExpiredNFTCache(c *gin.Context) {
 	})
 }
 
+// GetUserChatScore gets user's chat task cumulative score
+func (nh *NFTHandler) GetUserChatScore(c *gin.Context) {
+	userWallet := c.Param("wallet")
+	if userWallet == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "wallet address is required",
+		})
+		return
+	}
+
+	score, err := nh.pointsService.GetUserChatScore(c.Request.Context(), userWallet)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to get chat score: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    score,
+	})
+}
+
+// GetUserTodayEarnings gets user's today earnings breakdown
+func (nh *NFTHandler) GetUserTodayEarnings(c *gin.Context) {
+	userWallet := c.Param("wallet")
+	if userWallet == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "wallet address is required",
+		})
+		return
+	}
+
+	earnings, err := nh.pointsService.GetUserTodayEarnings(c.Request.Context(), userWallet)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to get today's earnings: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    earnings,
+	})
+}
+
+// addCreatorCommission adds 5% commission for subnet creator
+func (nh *NFTHandler) addCreatorCommission(ctx context.Context, subnetID string, userPoints int) error {
+	// 1. Get subnet creator
+	creatorWallet, err := nh.pointsService.GetSubnetCreator(ctx, subnetID)
+	if err != nil || creatorWallet == "" {
+		return fmt.Errorf("failed to get subnet creator: %v", err)
+	}
+
+	// 2. Calculate 5% commission (float)
+	commission := float64(userPoints) * 0.05
+
+	// 3. Get accumulated commission
+	accumulated, err := nh.pointsService.GetAccumulatedCommission(ctx, creatorWallet)
+	if err != nil {
+		return fmt.Errorf("failed to get accumulated commission: %v", err)
+	}
+
+	// 4. Calculate total accumulated commission
+	totalAccumulated := accumulated + commission
+	commissionPoints := int(math.Floor(totalAccumulated))
+	remainingAccumulated := totalAccumulated - float64(commissionPoints)
+
+	// 5. Update accumulated commission
+	if err := nh.pointsService.UpdateAccumulatedCommission(ctx, creatorWallet, remainingAccumulated, commissionPoints); err != nil {
+		return fmt.Errorf("failed to update accumulated commission: %v", err)
+	}
+
+	// 6. If we have integer points, distribute them immediately
+	if commissionPoints > 0 {
+		err = nh.pointsService.AddDirectPoints(ctx, &models.DirectPointsRequest{
+			UserWallet:  creatorWallet,
+			Points:      commissionPoints,
+			Source:      models.PointsSourceCreatorCommission,
+			Description: "Creator Commission from Chat Task",
+			Reference:   fmt.Sprintf("chat-commission-%s", subnetID),
+			SubnetID:    subnetID,
+			Metadata: map[string]interface{}{
+				"subnet_id":        subnetID,
+				"source_task_type": "chat",
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to distribute commission points: %v", err)
+		}
+		log.Printf("💰 Creator %s received %d commission points from chat task", creatorWallet[:10]+"...", commissionPoints)
+	}
+
+	return nil
+}
+
 // RegisterRoutes registers HTTP routes for NFT operations
 func (nh *NFTHandler) RegisterRoutes(router *gin.RouterGroup) {
 	points := router.Group("/points")
@@ -249,12 +354,15 @@ func (nh *NFTHandler) RegisterRoutes(router *gin.RouterGroup) {
 		points.POST("/nft-purchase", nh.HandleNFTPurchaseBonus)
 		points.POST("/invitation-reward", nh.HandleInvitationReward)
 		points.POST("/telegram-task-reward", nh.HandleTelegramTaskReward)
+		points.POST("/twitter-post-reward", nh.HandleTwitterPostReward)
+		points.POST("/chat-task-reward", nh.HandleChatTaskReward) // NEW: Chat task reward
 
 		// User completed tasks query
 		points.GET("/completed-tasks/:wallet", nh.GetUserCompletedTasks)
 
-		// Twitter post task reward
-		points.POST("/twitter-post-reward", nh.HandleTwitterPostReward)
+		// NEW: User chat score and today earnings
+		points.GET("/chat-score/:wallet", nh.GetUserChatScore)
+		points.GET("/earned-today/:wallet", nh.GetUserTodayEarnings)
 	}
 
 	nft := router.Group("/nft")
@@ -416,6 +524,104 @@ func (nh *NFTHandler) GetUserCompletedTasks(c *gin.Context) {
 			Limit:  limit,
 			Offset: offset,
 		},
+	})
+}
+
+// HandleChatTaskReward handles Chat task reward points
+func (nh *NFTHandler) HandleChatTaskReward(c *gin.Context) {
+	var req models.ChatTaskRewardRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid request format: " + err.Error(),
+		})
+		return
+	}
+
+	// Validate required fields
+	if req.UserWallet == "" || req.SubnetID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "user_wallet and subnet_id are required",
+		})
+		return
+	}
+
+	// Check if user has already completed a chat task for this subnet today
+	today := time.Now().Format("2006-01-02")
+	completed, err := nh.pointsService.CheckUserChatTaskToday(c.Request.Context(), req.UserWallet, req.SubnetID, today)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to check daily completion status: " + err.Error(),
+		})
+		return
+	}
+	if completed {
+		c.JSON(http.StatusConflict, gin.H{
+			"success": false,
+			"error":   "User has already completed a chat task for this subnet today",
+		})
+		return
+	}
+
+	// Check if user has NFT for bonus calculation
+	hasNFT, err := nh.nftService.CheckUserNFTOwnership(c.Request.Context(), req.UserWallet)
+	if err != nil {
+		hasNFT = false
+	}
+
+	// Calculate reward points
+	rewardPoints := 1 // Base chat task reward
+	if hasNFT {
+		rewardPoints = 2 // Double points for NFT holders
+	}
+
+	// Add points to user
+	err = nh.pointsService.AddDirectPoints(c.Request.Context(), &models.DirectPointsRequest{
+		UserWallet:  req.UserWallet,
+		Points:      rewardPoints,
+		Source:      models.PointsSourceChatTask,
+		Description: "Chat Task Reward",
+		Reference:   fmt.Sprintf("chat-%s-%s", req.SubnetID, today),
+		SubnetID:    req.SubnetID,
+		Metadata: map[string]interface{}{
+			"subnet_id":      req.SubnetID,
+			"has_nft":        hasNFT,
+			"base_reward":    1,
+			"nft_multiplier": hasNFT,
+			"reward_date":    today,
+		},
+	})
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to add chat task reward: " + err.Error(),
+		})
+		return
+	}
+
+	// Add creator 5% commission
+	if err := nh.addCreatorCommission(c.Request.Context(), req.SubnetID, rewardPoints); err != nil {
+		log.Printf("Failed to add creator commission for chat task: %v", err)
+		// Don't fail the main flow
+	}
+
+	// Get updated user total points
+	newTotal, err := nh.pointsService.GetUserPoints(c.Request.Context(), req.UserWallet)
+	if err != nil {
+		newTotal = 0
+	}
+
+	c.JSON(http.StatusOK, &models.ChatTaskRewardResponse{
+		Success:     true,
+		UserWallet:  req.UserWallet,
+		SubnetID:    req.SubnetID,
+		PointsAdded: rewardPoints,
+		NewTotal:    newTotal,
+		HasNFT:      hasNFT,
+		Message:     "Chat task reward added successfully",
 	})
 }
 
