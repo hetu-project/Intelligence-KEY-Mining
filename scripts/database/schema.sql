@@ -89,13 +89,15 @@ CREATE TABLE IF NOT EXISTS points_history (
     points INT NOT NULL,
     tx_ref VARCHAR(100) NULL,
     task_id VARCHAR(36) NULL,
+    subnet_id VARCHAR(36) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
     FOREIGN KEY (wallet_address) REFERENCES user_profiles(wallet_address) ON DELETE CASCADE,
     INDEX idx_wallet_address (wallet_address),
     INDEX idx_date (date),
     INDEX idx_source (source),
-    INDEX idx_task_id (task_id)
+    INDEX idx_task_id (task_id),
+    INDEX idx_subnet_id (subnet_id)
 );
 
 -- Invite relationships
@@ -758,5 +760,13 @@ CREATE TABLE IF NOT EXISTS creator_commission_accumulation (
     FOREIGN KEY (creator_wallet) REFERENCES user_profiles(wallet_address) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci 
 COMMENT='Accumulates fractional creator commissions across PoCW rounds';
+
+-- ============================================
+-- Add foreign key constraint for points_history.subnet_id
+-- (Must be added after subnets table is created)
+-- ============================================
+ALTER TABLE points_history 
+ADD CONSTRAINT fk_points_history_subnet 
+FOREIGN KEY (subnet_id) REFERENCES subnets(id) ON DELETE SET NULL;
 
 FLUSH PRIVILEGES;

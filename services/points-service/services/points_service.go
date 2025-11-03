@@ -612,13 +612,21 @@ func (ps *PointsService) addPointsRecord(ctx context.Context, record *models.Poi
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`
 
+	// Convert empty subnet_id to NULL for foreign key constraint
+	var subnetID interface{}
+	if record.SubnetID == "" {
+		subnetID = nil
+	} else {
+		subnetID = record.SubnetID
+	}
+
 	_, err := ps.db.ExecContext(ctx, query,
 		record.WalletAddress,
 		record.Date,
 		record.Source,
 		record.Points,
 		record.TxRef,
-		record.SubnetID,
+		subnetID,
 		record.CreatedAt,
 	)
 
