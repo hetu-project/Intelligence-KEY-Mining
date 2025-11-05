@@ -554,6 +554,49 @@ func (sh *StatsHandler) GetSubnetUserRanking(c *gin.Context) {
 	})
 }
 
+// GetSubnetsDailyPoints gets daily points for all subnets over the past N days
+func (sh *StatsHandler) GetSubnetsDailyPoints(c *gin.Context) {
+	// Parse days parameter (default 7, max 30)
+	days := 7
+	if daysParam := c.Query("days"); daysParam != "" {
+		if parsedDays, err := strconv.Atoi(daysParam); err == nil && parsedDays > 0 && parsedDays <= 30 {
+			days = parsedDays
+		}
+	}
+
+	// Optional subnet_id filter
+	subnetID := c.Query("subnet_id")
+
+	// Query data
+	subnets, err := sh.statsService.GetSubnetsDailyPoints(c.Request.Context(), days, subnetID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to get subnets daily points: " + err.Error(),
+		})
+		return
+	}
+
+	// Calculate date range for response
+	startDate := ""
+	endDate := ""
+	if len(subnets) > 0 && len(subnets[0].DailyPoints) > 0 {
+		startDate = subnets[0].DailyPoints[0].Date
+		endDate = subnets[0].DailyPoints[len(subnets[0].DailyPoints)-1].Date
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"start_date":  startDate,
+			"end_date":    endDate,
+			"days":        days,
+			"subnets":     subnets,
+			"total_count": len(subnets),
+		},
+	})
+}
+
 // RegisterRoutes registers HTTP routes for stats
 func (sh *StatsHandler) RegisterRoutes(router *gin.RouterGroup) {
 	stats := router.Group("/stats")
@@ -574,6 +617,7 @@ func (sh *StatsHandler) RegisterRoutes(router *gin.RouterGroup) {
 
 		// Subnet statistics
 		stats.GET("/subnets", sh.GetSubnetStats)
+		stats.GET("/subnets/daily-points", sh.GetSubnetsDailyPoints) // NEW: Subnet daily points over N days
 		stats.GET("/subnets/:subnet_id", sh.GetSubnetDetails)
 		stats.GET("/subnets/:subnet_id/points-today", sh.GetSubnetPointsToday)
 		stats.GET("/subnets/:subnet_id/users-count", sh.GetSubnetUsersCount)

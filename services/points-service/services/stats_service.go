@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 )
 
 // StatsService handles statistics and queries
@@ -112,6 +113,23 @@ type DashboardStats struct {
 	TodayActiveUsers int     `json:"today_active_users"`
 	UsersWithNFT     int     `json:"users_with_nft"`
 	AvgPointsPerUser float64 `json:"avg_points_per_user"`
+}
+
+// DailyPointsData represents daily points data for a specific date
+type DailyPointsData struct {
+	Date        string `json:"date"`         // "2025-11-03"
+	Points      int    `json:"points"`       // Total points for the day
+	ActiveUsers int    `json:"active_users"` // Number of active users for the day
+}
+
+// SubnetDailyPoints represents subnet with 7-day daily points statistics
+type SubnetDailyPoints struct {
+	SubnetID    string            `json:"subnet_id"`
+	SubnetName  string            `json:"subnet_name"`
+	SubnetIcon  string            `json:"subnet_icon"`
+	DailyPoints []DailyPointsData `json:"daily_points"` // 7 days of data
+	Total7Days  int               `json:"total_7days"`  // Total points in 7 days
+	AvgPerDay   float64           `json:"avg_per_day"`  // Average points per day
 }
 
 // GetTotalPoints gets total points across all users
@@ -963,4 +981,138 @@ func (ss *StatsService) GetDashboardStats(ctx context.Context) (*DashboardStats,
 	stats.AvgPointsPerUser = overallStats.AvgPointsPerUser
 
 	return stats, nil
+}
+
+// GetSubnetsDailyPoints gets daily points for all subnets over the past N days
+func (ss *StatsService) GetSubnetsDailyPoints(ctx context.Context, days int, subnetID string) ([]*SubnetDailyPoints, error) {
+	if days <= 0 || days > 30 {
+		days = 7 // Default to 7 days, max 30
+	}
+
+	// Build WHERE clause for optional subnet filter
+	subnetFilter := ""
+	args := []interface{}{days - 1}
+	if subnetID != "" {
+		subnetFilter = "AND s.id = ?"
+		args = append(args, subnetID)
+	}
+
+	// Query daily points data
+	query := fmt.Sprintf(`
+		SELECT 
+			s.id as subnet_id,
+			s.name as subnet_name,
+			s.icon as subnet_icon,
+			DATE(ph.created_at) as date,
+			COALESCE(SUM(ph.points), 0) as points,
+			COUNT(DISTINCT ph.wallet_address) as active_users
+		FROM subnets s
+		LEFT JOIN points_history ph ON (
+			-- Case 1: Chat task with direct subnet_id
+			(ph.subnet_id = s.id AND ph.source = 'Chat Task')
+			OR
+			-- Case 2: Other tasks via tasks table
+			(ph.subnet_id IS NULL 
+			 AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
+			 AND EXISTS (
+				 SELECT 1 FROM tasks t WHERE 
+				 t.subnet_id = s.id 
+				 AND t.id = CASE 
+					 WHEN ph.tx_ref LIKE 'pocw-consensus-%%' 
+					 THEN SUBSTRING(ph.tx_ref, 16)
+					 ELSE ph.tx_ref
+				 END
+			 ))
+		)
+		AND ph.created_at IS NOT NULL
+		AND DATE(ph.created_at) BETWEEN DATE_SUB(CURDATE(), INTERVAL ? DAY) AND CURDATE()
+		WHERE s.status = 'active' %s
+		GROUP BY s.id, s.name, s.icon, DATE(ph.created_at)
+		ORDER BY s.id, date
+	`, subnetFilter)
+
+	rows, err := ss.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query subnet daily points: %v", err)
+	}
+	defer rows.Close()
+
+	// Organize data by subnet
+	subnetMap := make(map[string]*SubnetDailyPoints)
+	for rows.Next() {
+		var subnetID, subnetName, subnetIcon string
+		var date sql.NullString
+		var points, activeUsers int
+
+		err := rows.Scan(&subnetID, &subnetName, &subnetIcon, &date, &points, &activeUsers)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan row: %v", err)
+		}
+
+		// Initialize subnet if not exists
+		if _, exists := subnetMap[subnetID]; !exists {
+			subnetMap[subnetID] = &SubnetDailyPoints{
+				SubnetID:    subnetID,
+				SubnetName:  subnetName,
+				SubnetIcon:  subnetIcon,
+				DailyPoints: []DailyPointsData{},
+			}
+		}
+
+		// Add daily data if date is valid
+		if date.Valid {
+			subnetMap[subnetID].DailyPoints = append(subnetMap[subnetID].DailyPoints, DailyPointsData{
+				Date:        date.String,
+				Points:      points,
+				ActiveUsers: activeUsers,
+			})
+		}
+	}
+
+	// Fill missing dates and calculate totals
+	result := make([]*SubnetDailyPoints, 0, len(subnetMap))
+	for _, subnet := range subnetMap {
+		// Fill missing dates with zeros
+		subnet.DailyPoints = fillMissingDates(subnet.DailyPoints, days)
+
+		// Calculate totals
+		total := 0
+		for _, daily := range subnet.DailyPoints {
+			total += daily.Points
+		}
+		subnet.Total7Days = total
+		if days > 0 {
+			subnet.AvgPerDay = float64(total) / float64(days)
+		}
+
+		result = append(result, subnet)
+	}
+
+	return result, nil
+}
+
+// fillMissingDates fills missing dates in daily points data with zeros
+func fillMissingDates(dailyPoints []DailyPointsData, days int) []DailyPointsData {
+	// Create a map of existing dates
+	dataMap := make(map[string]DailyPointsData)
+	for _, data := range dailyPoints {
+		dataMap[data.Date] = data
+	}
+
+	// Generate all dates for the past N days
+	result := make([]DailyPointsData, days)
+	for i := days - 1; i >= 0; i-- {
+		date := time.Now().AddDate(0, 0, -i).Format("2006-01-02")
+		if data, exists := dataMap[date]; exists {
+			result[days-1-i] = data
+		} else {
+			result[days-1-i] = DailyPointsData{
+				Date:        date,
+				Points:      0,
+				ActiveUsers: 0,
+			}
+		}
+	}
+
+	return result
 }
