@@ -1094,7 +1094,13 @@ func (ss *StatsService) GetSubnetsDailyPoints(ctx context.Context, days int, sub
 
 		// Merge data for same subnet+date (from UNION ALL results)
 		if date.Valid {
-			key := dateKey{subnetID: subnetID, date: date.String}
+			// Extract only date part (YYYY-MM-DD) from datetime string
+			dateStr := date.String
+			if len(dateStr) >= 10 {
+				dateStr = dateStr[:10]
+			}
+
+			key := dateKey{subnetID: subnetID, date: dateStr}
 			if existing, exists := dateDataMap[key]; exists {
 				// Merge with existing data
 				existing.Points += points
@@ -1102,7 +1108,7 @@ func (ss *StatsService) GetSubnetsDailyPoints(ctx context.Context, days int, sub
 			} else {
 				// Create new entry
 				dateDataMap[key] = &DailyPointsData{
-					Date:        date.String,
+					Date:        dateStr,
 					Points:      points,
 					ActiveUsers: activeUsers,
 				}
