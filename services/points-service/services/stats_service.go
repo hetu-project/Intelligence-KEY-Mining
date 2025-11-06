@@ -990,48 +990,65 @@ func (ss *StatsService) GetSubnetsDailyPoints(ctx context.Context, days int, sub
 	}
 
 	// Build WHERE clause for optional subnet filter
+	// Note: We need the days parameter twice (for each query in UNION)
 	subnetFilter := ""
-	args := []interface{}{days - 1}
+	daysParam := days - 1
+	var args []interface{}
+
 	if subnetID != "" {
 		subnetFilter = "AND s.id = ?"
-		args = append(args, subnetID)
+		// Parameters: days for query1, subnet_id for query1, days for query2, subnet_id for query2
+		args = []interface{}{daysParam, subnetID, daysParam, subnetID}
+	} else {
+		// Parameters: days for query1, days for query2
+		args = []interface{}{daysParam, daysParam}
 	}
 
-	// Query daily points data
+	// Query daily points data using UNION ALL for better performance
+	// Split Chat Task and other tasks into separate queries
 	query := fmt.Sprintf(`
 		SELECT 
 			s.id as subnet_id,
 			s.name as subnet_name,
 			s.icon as subnet_icon,
 			DATE(ph.created_at) as date,
-			COALESCE(SUM(ph.points), 0) as points,
+			SUM(ph.points) as points,
 			COUNT(DISTINCT ph.wallet_address) as active_users
 		FROM subnets s
-		LEFT JOIN points_history ph ON (
-			ph.created_at IS NOT NULL
+		INNER JOIN points_history ph ON ph.subnet_id = s.id 
+			AND ph.source = 'Chat Task'
+			AND ph.created_at IS NOT NULL
 			AND DATE(ph.created_at) BETWEEN DATE_SUB(CURDATE(), INTERVAL ? DAY) AND CURDATE()
-			AND (
-				-- Case 1: Chat task with direct subnet_id
-				(ph.subnet_id = s.id AND ph.source = 'Chat Task')
-				OR
-				-- Case 2: Other tasks via tasks table
-				(ph.subnet_id IS NULL 
-				 AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
-				 AND EXISTS (
-					 SELECT 1 FROM tasks t WHERE 
-					 t.subnet_id = s.id 
-					 AND t.id = CASE 
-						 WHEN ph.tx_ref LIKE 'pocw-consensus-%%' 
-						 THEN SUBSTRING(ph.tx_ref, 16)
-						 ELSE ph.tx_ref
-					 END
-				 ))
-			)
+		WHERE s.status = 'active' %s
+		GROUP BY s.id, s.name, s.icon, DATE(ph.created_at)
+		
+		UNION ALL
+		
+		SELECT 
+			s.id as subnet_id,
+			s.name as subnet_name,
+			s.icon as subnet_icon,
+			DATE(ph.created_at) as date,
+			SUM(ph.points) as points,
+			COUNT(DISTINCT ph.wallet_address) as active_users
+		FROM subnets s
+		INNER JOIN tasks t ON t.subnet_id = s.id
+		INNER JOIN points_history ph ON (
+			ph.subnet_id IS NULL
+			AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
+			AND ph.created_at IS NOT NULL
+			AND DATE(ph.created_at) BETWEEN DATE_SUB(CURDATE(), INTERVAL ? DAY) AND CURDATE()
+			AND t.id = CASE 
+				WHEN ph.tx_ref LIKE 'pocw-consensus-%%' 
+				THEN SUBSTRING(ph.tx_ref, 16)
+				ELSE ph.tx_ref
+			END
 		)
 		WHERE s.status = 'active' %s
 		GROUP BY s.id, s.name, s.icon, DATE(ph.created_at)
-		ORDER BY s.id, date
-	`, subnetFilter)
+		
+		ORDER BY subnet_id, date
+	`, subnetFilter, subnetFilter)
 
 	rows, err := ss.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -1039,8 +1056,17 @@ func (ss *StatsService) GetSubnetsDailyPoints(ctx context.Context, days int, sub
 	}
 	defer rows.Close()
 
-	// Organize data by subnet
-	subnetMap := make(map[string]*SubnetDailyPoints)
+	// Organize data by subnet and date (merge UNION ALL results)
+	type dateKey struct {
+		subnetID string
+		date     string
+	}
+	dateDataMap := make(map[dateKey]*DailyPointsData)
+	subnetInfoMap := make(map[string]struct {
+		name string
+		icon string
+	})
+
 	for rows.Next() {
 		var subnetID, subnetName, subnetIcon string
 		var date sql.NullString
@@ -1051,24 +1077,45 @@ func (ss *StatsService) GetSubnetsDailyPoints(ctx context.Context, days int, sub
 			return nil, fmt.Errorf("failed to scan row: %v", err)
 		}
 
-		// Initialize subnet if not exists
-		if _, exists := subnetMap[subnetID]; !exists {
-			subnetMap[subnetID] = &SubnetDailyPoints{
-				SubnetID:    subnetID,
-				SubnetName:  subnetName,
-				SubnetIcon:  subnetIcon,
+		// Store subnet info
+		if _, exists := subnetInfoMap[subnetID]; !exists {
+			subnetInfoMap[subnetID] = struct {
+				name string
+				icon string
+			}{name: subnetName, icon: subnetIcon}
+		}
+
+		// Merge data for same subnet+date (from UNION ALL results)
+		if date.Valid {
+			key := dateKey{subnetID: subnetID, date: date.String}
+			if existing, exists := dateDataMap[key]; exists {
+				// Merge with existing data
+				existing.Points += points
+				existing.ActiveUsers += activeUsers
+			} else {
+				// Create new entry
+				dateDataMap[key] = &DailyPointsData{
+					Date:        date.String,
+					Points:      points,
+					ActiveUsers: activeUsers,
+				}
+			}
+		}
+	}
+
+	// Organize by subnet
+	subnetMap := make(map[string]*SubnetDailyPoints)
+	for key, data := range dateDataMap {
+		if _, exists := subnetMap[key.subnetID]; !exists {
+			info := subnetInfoMap[key.subnetID]
+			subnetMap[key.subnetID] = &SubnetDailyPoints{
+				SubnetID:    key.subnetID,
+				SubnetName:  info.name,
+				SubnetIcon:  info.icon,
 				DailyPoints: []DailyPointsData{},
 			}
 		}
-
-		// Add daily data if date is valid
-		if date.Valid {
-			subnetMap[subnetID].DailyPoints = append(subnetMap[subnetID].DailyPoints, DailyPointsData{
-				Date:        date.String,
-				Points:      points,
-				ActiveUsers: activeUsers,
-			})
-		}
+		subnetMap[key.subnetID].DailyPoints = append(subnetMap[key.subnetID].DailyPoints, *data)
 	}
 
 	// Get end date from database (to match MySQL timezone)
