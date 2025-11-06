@@ -1071,11 +1071,18 @@ func (ss *StatsService) GetSubnetsDailyPoints(ctx context.Context, days int, sub
 		}
 	}
 
+	// Get end date from database (to match MySQL timezone)
+	var dbDate string
+	err = ss.db.QueryRowContext(ctx, "SELECT CURDATE()").Scan(&dbDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current date: %v", err)
+	}
+
 	// Fill missing dates and calculate totals
 	result := make([]*SubnetDailyPoints, 0, len(subnetMap))
 	for _, subnet := range subnetMap {
-		// Fill missing dates with zeros
-		subnet.DailyPoints = fillMissingDates(subnet.DailyPoints, days)
+		// Fill missing dates with zeros (using database date)
+		subnet.DailyPoints = fillMissingDatesFromEnd(subnet.DailyPoints, days, dbDate)
 
 		// Calculate totals
 		total := 0
@@ -1093,18 +1100,26 @@ func (ss *StatsService) GetSubnetsDailyPoints(ctx context.Context, days int, sub
 	return result, nil
 }
 
-// fillMissingDates fills missing dates in daily points data with zeros
-func fillMissingDates(dailyPoints []DailyPointsData, days int) []DailyPointsData {
+// fillMissingDatesFromEnd fills missing dates in daily points data with zeros
+// Uses the provided end date (from database) to ensure timezone consistency
+func fillMissingDatesFromEnd(dailyPoints []DailyPointsData, days int, endDate string) []DailyPointsData {
+	// Parse end date
+	end, err := time.Parse("2006-01-02", endDate)
+	if err != nil {
+		// Fallback to current time if parse fails
+		end = time.Now()
+	}
+
 	// Create a map of existing dates
 	dataMap := make(map[string]DailyPointsData)
 	for _, data := range dailyPoints {
 		dataMap[data.Date] = data
 	}
 
-	// Generate all dates for the past N days
+	// Generate all dates for the past N days from end date
 	result := make([]DailyPointsData, days)
 	for i := days - 1; i >= 0; i-- {
-		date := time.Now().AddDate(0, 0, -i).Format("2006-01-02")
+		date := end.AddDate(0, 0, -i).Format("2006-01-02")
 		if data, exists := dataMap[date]; exists {
 			result[days-1-i] = data
 		} else {
