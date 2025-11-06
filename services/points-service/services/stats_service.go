@@ -1008,24 +1008,26 @@ func (ss *StatsService) GetSubnetsDailyPoints(ctx context.Context, days int, sub
 			COUNT(DISTINCT ph.wallet_address) as active_users
 		FROM subnets s
 		LEFT JOIN points_history ph ON (
-			-- Case 1: Chat task with direct subnet_id
-			(ph.subnet_id = s.id AND ph.source = 'Chat Task')
-			OR
-			-- Case 2: Other tasks via tasks table
-			(ph.subnet_id IS NULL 
-			 AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
-			 AND EXISTS (
-				 SELECT 1 FROM tasks t WHERE 
-				 t.subnet_id = s.id 
-				 AND t.id = CASE 
-					 WHEN ph.tx_ref LIKE 'pocw-consensus-%%' 
-					 THEN SUBSTRING(ph.tx_ref, 16)
-					 ELSE ph.tx_ref
-				 END
-			 ))
+			ph.created_at IS NOT NULL
+			AND DATE(ph.created_at) BETWEEN DATE_SUB(CURDATE(), INTERVAL ? DAY) AND CURDATE()
+			AND (
+				-- Case 1: Chat task with direct subnet_id
+				(ph.subnet_id = s.id AND ph.source = 'Chat Task')
+				OR
+				-- Case 2: Other tasks via tasks table
+				(ph.subnet_id IS NULL 
+				 AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
+				 AND EXISTS (
+					 SELECT 1 FROM tasks t WHERE 
+					 t.subnet_id = s.id 
+					 AND t.id = CASE 
+						 WHEN ph.tx_ref LIKE 'pocw-consensus-%%' 
+						 THEN SUBSTRING(ph.tx_ref, 16)
+						 ELSE ph.tx_ref
+					 END
+				 ))
+			)
 		)
-		AND ph.created_at IS NOT NULL
-		AND DATE(ph.created_at) BETWEEN DATE_SUB(CURDATE(), INTERVAL ? DAY) AND CURDATE()
 		WHERE s.status = 'active' %s
 		GROUP BY s.id, s.name, s.icon, DATE(ph.created_at)
 		ORDER BY s.id, date
