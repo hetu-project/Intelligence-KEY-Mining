@@ -1056,6 +1056,9 @@ func (ss *StatsService) GetSubnetsDailyPoints(ctx context.Context, days int, sub
 	}
 	defer rows.Close()
 
+	// Debug: log query execution
+	fmt.Printf("[DEBUG] GetSubnetsDailyPoints query executed with args: %v\n", args)
+
 	// Organize data by subnet and date (merge UNION ALL results)
 	type dateKey struct {
 		subnetID string
@@ -1067,7 +1070,9 @@ func (ss *StatsService) GetSubnetsDailyPoints(ctx context.Context, days int, sub
 		icon string
 	})
 
+	rowCount := 0
 	for rows.Next() {
+		rowCount++
 		var subnetID, subnetName, subnetIcon string
 		var date sql.NullString
 		var points, activeUsers int
@@ -1076,6 +1081,8 @@ func (ss *StatsService) GetSubnetsDailyPoints(ctx context.Context, days int, sub
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan row: %v", err)
 		}
+
+		fmt.Printf("[DEBUG] Row %d: subnet=%s, date=%v, points=%d, users=%d\n", rowCount, subnetID, date, points, activeUsers)
 
 		// Store subnet info
 		if _, exists := subnetInfoMap[subnetID]; !exists {
@@ -1102,6 +1109,8 @@ func (ss *StatsService) GetSubnetsDailyPoints(ctx context.Context, days int, sub
 			}
 		}
 	}
+
+	fmt.Printf("[DEBUG] Total rows scanned: %d, dateDataMap size: %d\n", rowCount, len(dateDataMap))
 
 	// Organize by subnet
 	subnetMap := make(map[string]*SubnetDailyPoints)
