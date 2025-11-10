@@ -9,6 +9,7 @@ const (
 	PointsSourceTaskCreation      = "Task Creation"
 	PointsSourceTwitterRetweet    = "Twitter Retweet Task"
 	PointsSourceTwitterPost       = "Twitter Post Task"
+	PointsSourceTwitterFollow     = "Twitter Follow Task"
 	PointsSourceVLCDistribution   = "VLC Distribution"
 	PointsSourceNFTPurchase       = "NFT Purchase Bonus"
 	PointsSourceInvitationReward  = "Invitation Reward"
@@ -154,6 +155,24 @@ type TwitterPostRewardResponse struct {
 	UserWallet   string `json:"user_wallet"`
 	TaskID       string `json:"task_id"`
 	PostURL      string `json:"post_url"`
+	PointsAdded  int    `json:"points_added"`
+	NewTotal     int    `json:"new_total"`
+	HasNFT       bool   `json:"has_nft"`
+	Message      string `json:"message,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
+}
+
+// TwitterFollowRewardRequest represents a Twitter follow reward request
+type TwitterFollowRewardRequest struct {
+	UserWallet string `json:"user_wallet" validate:"required"`
+	TaskID     string `json:"task_id" validate:"required"`
+}
+
+// TwitterFollowRewardResponse represents a Twitter follow reward response
+type TwitterFollowRewardResponse struct {
+	Success      bool   `json:"success"`
+	UserWallet   string `json:"user_wallet"`
+	TaskID       string `json:"task_id"`
 	PointsAdded  int    `json:"points_added"`
 	NewTotal     int    `json:"new_total"`
 	HasNFT       bool   `json:"has_nft"`

@@ -45,6 +45,19 @@ type NFTCheckResponse struct {
 
 // CheckUserNFTOwnership checks if a user owns an NFT
 func (ns *NFTService) CheckUserNFTOwnership(ctx context.Context, userWallet string) (bool, error) {
+	// ⚠️ NFT_BONUS_DISABLED: Temporarily disable NFT bonus (always return false)
+	// Set to true to re-enable NFT 2x points bonus in the future
+	const NFT_BONUS_DISABLED = true
+
+	if NFT_BONUS_DISABLED {
+		// Return false to disable NFT bonus without deleting code
+		// All task rewards will use base points (no 2x multiplier)
+		return false, nil
+	}
+
+	// Original NFT check logic below (kept for future use)
+	// ================================================================
+
 	// 1. Check cache first
 	cached, err := ns.getCachedNFTStatus(ctx, userWallet)
 	if err == nil && cached != nil {

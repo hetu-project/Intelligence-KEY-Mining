@@ -124,12 +124,14 @@ type DailyPointsData struct {
 
 // SubnetDailyPoints represents subnet with 7-day daily points statistics
 type SubnetDailyPoints struct {
-	SubnetID    string            `json:"subnet_id"`
-	SubnetName  string            `json:"subnet_name"`
-	SubnetIcon  string            `json:"subnet_icon"`
-	DailyPoints []DailyPointsData `json:"daily_points"` // 7 days of data
-	Total7Days  int               `json:"total_7days"`  // Total points in 7 days
-	AvgPerDay   float64           `json:"avg_per_day"`  // Average points per day
+	SubnetID           string            `json:"subnet_id"`
+	SubnetName         string            `json:"subnet_name"`
+	SubnetIcon         string            `json:"subnet_icon"`
+	DailyPoints        []DailyPointsData `json:"daily_points"`        // Daily task points
+	Total7Days         int               `json:"total_7days"`         // Total including overrides
+	AvgPerDay          float64           `json:"avg_per_day"`         // Average per day
+	OverrideAdjustment int               `json:"override_adjustment"` // Total override adjustment
+	TaskPointsSum      int               `json:"task_points_sum"`     // Sum of actual task points
 }
 
 // GetTotalPoints gets total points across all users
@@ -588,84 +590,149 @@ func (ss *StatsService) GetOverallStats(ctx context.Context) (*OverallStats, err
 	return stats, nil
 }
 
-// GetUserSubnets gets subnets that a user has participated in
+// GetUserSubnets gets subnets that a user has participated in (with override support)
 func (ss *StatsService) GetUserSubnets(ctx context.Context, userWallet string) ([]*SubnetStats, error) {
+	// Get distinct subnets the user has participated in
 	query := `
-		SELECT DISTINCT 
-			s.id as subnet_id,
-			s.name as subnet_name,
-			s.icon as subnet_icon,
-			s.creator_wallet,
-			COUNT(DISTINCT t.id) as total_tasks,
-			COUNT(DISTINCT CASE WHEN t.status = 'CONFIRMED' THEN t.id END) as completed_tasks,
-			COUNT(DISTINCT utc.user_wallet) as unique_users,
-			COALESCE(SUM(utc.points_earned), 0) as total_points_distributed,
-			COALESCE(SUM(CASE WHEN DATE(utc.completed_at) = CURDATE() THEN utc.points_earned ELSE 0 END), 0) as today_points_distributed,
-			COUNT(DISTINCT CASE WHEN DATE(utc.completed_at) = CURDATE() THEN utc.user_wallet END) as today_active_users
-		FROM subnets s
-		LEFT JOIN tasks t ON s.id = t.subnet_id
-		LEFT JOIN user_task_completions utc ON t.id = utc.task_id
-		WHERE s.status = 'active' 
-		AND utc.user_wallet = ?
-		GROUP BY s.id, s.name, s.icon, s.creator_wallet
-		ORDER BY total_points_distributed DESC
+		SELECT DISTINCT subnet_id FROM (
+			-- From Chat Task
+			SELECT DISTINCT ph.subnet_id
+			FROM points_history ph
+			WHERE ph.wallet_address = ?
+				AND ph.subnet_id IS NOT NULL
+				AND ph.source = 'Chat Task'
+			
+			UNION
+			
+			-- From other tasks
+			SELECT DISTINCT t.subnet_id
+			FROM points_history ph
+			INNER JOIN tasks t ON (
+				CASE 
+					WHEN ph.tx_ref LIKE 'pocw-consensus-%' 
+					THEN SUBSTRING(ph.tx_ref, 16)
+					ELSE ph.tx_ref
+				END = t.id
+			)
+			WHERE ph.wallet_address = ?
+				AND t.subnet_id IS NOT NULL
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+		) AS user_subnets
 	`
 
-	rows, err := ss.db.QueryContext(ctx, query, userWallet)
+	rows, err := ss.db.QueryContext(ctx, query, userWallet, userWallet)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query user subnets: %v", err)
 	}
 	defer rows.Close()
 
-	var subnets []*SubnetStats
+	var subnetIDs []string
 	for rows.Next() {
+		var subnetID string
+		if err := rows.Scan(&subnetID); err != nil {
+			return nil, fmt.Errorf("failed to scan subnet ID: %v", err)
+		}
+		subnetIDs = append(subnetIDs, subnetID)
+	}
+
+	// For each subnet, get detailed stats
+	var subnets []*SubnetStats
+	for _, subnetID := range subnetIDs {
+		// Get subnet info
 		var subnet SubnetStats
-		err := rows.Scan(
+		var status string
+		err := ss.db.QueryRowContext(ctx, `
+			SELECT id, name, icon, creator_wallet, status
+			FROM subnets
+			WHERE id = ? AND status = 'active'
+		`, subnetID).Scan(
 			&subnet.SubnetID,
 			&subnet.SubnetName,
 			&subnet.SubnetIcon,
 			&subnet.CreatorWallet,
-			&subnet.TotalTasks,
-			&subnet.CompletedTasks,
-			&subnet.UniqueUsers,
-			&subnet.TotalPointsDistributed,
-			&subnet.TodayPointsDistributed,
-			&subnet.TodayActiveUsers,
+			&status,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan user subnet: %v", err)
+			continue // Skip if subnet not found or not active
 		}
+
+		// Get user's total points in this subnet (with override)
+		totalPoints, _, err := ss.GetUserSubnetTotalPoints(ctx, subnetID, userWallet)
+		if err == nil {
+			subnet.TotalPointsDistributed = totalPoints
+		}
+
+		// Count completed tasks for this user in this subnet
+		var completedTasks int
+		err = ss.db.QueryRowContext(ctx, `
+			SELECT COUNT(DISTINCT tx_ref) FROM (
+				SELECT ph.tx_ref
+				FROM points_history ph
+				WHERE ph.wallet_address = ?
+					AND ph.subnet_id = ?
+					AND ph.source = 'Chat Task'
+				
+				UNION ALL
+				
+				SELECT CASE 
+					WHEN ph.tx_ref LIKE 'pocw-consensus-%' 
+					THEN SUBSTRING(ph.tx_ref, 16)
+					ELSE ph.tx_ref
+				END as tx_ref
+				FROM points_history ph
+				INNER JOIN tasks t ON (
+					CASE 
+						WHEN ph.tx_ref LIKE 'pocw-consensus-%' 
+						THEN SUBSTRING(ph.tx_ref, 16)
+						ELSE ph.tx_ref
+					END = t.id
+				)
+				WHERE ph.wallet_address = ?
+					AND t.subnet_id = ?
+					AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+			) AS user_tasks
+		`, userWallet, subnetID, userWallet, subnetID).Scan(&completedTasks)
+
+		if err == nil {
+			subnet.CompletedTasks = completedTasks
+		}
+
 		subnets = append(subnets, &subnet)
 	}
 
 	return subnets, nil
 }
 
-// GetUserSubnetSummary gets a summary of user's subnet participation
+// GetUserSubnetSummary gets a summary of user's subnet participation (with override support)
 func (ss *StatsService) GetUserSubnetSummary(ctx context.Context, userWallet string) (map[string]interface{}, error) {
-	// Get basic stats
-	query := `
-		SELECT 
-			COUNT(DISTINCT utc.subnet_id) as participated_subnets,
-			COUNT(DISTINCT utc.task_id) as completed_tasks,
-			COALESCE(SUM(utc.points_earned), 0) as total_points_earned,
-			COALESCE(SUM(CASE WHEN DATE(utc.completed_at) = CURDATE() THEN utc.points_earned ELSE 0 END), 0) as today_points_earned
-		FROM user_task_completions utc
-		WHERE utc.user_wallet = ?
-	`
-
-	var participatedSubnets, completedTasks, totalPointsEarned, todayPointsEarned int
-	err := ss.db.QueryRowContext(ctx, query, userWallet).Scan(
-		&participatedSubnets, &completedTasks, &totalPointsEarned, &todayPointsEarned,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get user subnet summary: %v", err)
-	}
-
-	// Get user subnets
+	// Get user subnets (already includes override support)
 	subnets, err := ss.GetUserSubnets(ctx, userWallet)
 	if err != nil {
 		return nil, err
+	}
+
+	participatedSubnets := len(subnets)
+
+	// Calculate total points and completed tasks from subnets
+	totalPointsEarned := 0
+	completedTasks := 0
+	for _, subnet := range subnets {
+		totalPointsEarned += subnet.TotalPointsDistributed
+		completedTasks += subnet.CompletedTasks
+	}
+
+	// Get today's points earned (from points_history)
+	var todayPointsEarned int
+	err = ss.db.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(points), 0)
+		FROM points_history
+		WHERE wallet_address = ?
+			AND DATE(created_at) = CURDATE()
+			AND source IN ('Chat Task', 'VLC Distribution', 'Twitter Post Task', 'Telegram Task')
+	`, userWallet).Scan(&todayPointsEarned)
+
+	if err != nil {
+		todayPointsEarned = 0 // Default to 0 if query fails
 	}
 
 	return map[string]interface{}{
@@ -681,25 +748,37 @@ func (ss *StatsService) GetUserSubnetSummary(ctx context.Context, userWallet str
 // GetSubnetUserRanking gets user ranking by points in a specific subnet
 func (ss *StatsService) GetSubnetUserRanking(ctx context.Context, subnetID string, limit, offset int) ([]*SubnetUserRank, int, error) {
 	// Get total count of users in this subnet from points_history
+	// Use UNION to count users from both Chat Task (direct subnet_id) and other tasks (via tasks table)
 	countQuery := `
-		SELECT COUNT(DISTINCT ph.wallet_address)
-		FROM points_history ph 
-		LEFT JOIN tasks t ON (
-			CASE 
-				WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
-				ELSE ph.tx_ref
-			END = t.id
-		)
-		WHERE t.subnet_id = ?
-		AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Chat Task')
+		SELECT COUNT(DISTINCT wallet_address) FROM (
+			SELECT DISTINCT ph.wallet_address
+			FROM points_history ph
+			WHERE ph.subnet_id = ?
+				AND ph.source = 'Chat Task'
+			
+			UNION
+			
+			SELECT DISTINCT ph.wallet_address
+			FROM points_history ph
+			INNER JOIN tasks t ON (
+				CASE 
+					WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+					ELSE ph.tx_ref
+				END = t.id
+			)
+			WHERE t.subnet_id = ?
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+		) AS all_users
 	`
 	var totalCount int
-	err := ss.db.QueryRowContext(ctx, countQuery, subnetID).Scan(&totalCount)
+	err := ss.db.QueryRowContext(ctx, countQuery, subnetID, subnetID).Scan(&totalCount)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get subnet users count: %v", err)
 	}
 
-	// Get user ranking based on points_history
+	// Get user ranking based on points_history with override support
+	// Use UNION ALL to aggregate points from both Chat Task and other tasks
+	// If override exists, use: override_points + points after override time
 	query := `
 		SELECT 
 			ranked_users.user_wallet,
@@ -709,32 +788,68 @@ func (ss *StatsService) GetSubnetUserRanking(ctx context.Context, subnetID strin
 			ranked_users.user_rank
 		FROM (
 			SELECT 
-				ph.wallet_address as user_wallet,
-				SUM(ph.points) as total_points,
-				COUNT(DISTINCT 
+				user_wallet,
+				CASE 
+					WHEN override_points IS NOT NULL 
+					THEN override_points + COALESCE(SUM(CASE WHEN after_override = 1 THEN total_points ELSE 0 END), 0)
+					ELSE SUM(total_points)
+				END as total_points,
+				SUM(completed_tasks) as completed_tasks,
+				ROW_NUMBER() OVER (ORDER BY 
+					CASE 
+						WHEN override_points IS NOT NULL 
+						THEN override_points + COALESCE(SUM(CASE WHEN after_override = 1 THEN total_points ELSE 0 END), 0)
+						ELSE SUM(total_points)
+					END DESC
+				) as user_rank
+			FROM (
+				-- Chat Task: direct subnet_id in points_history
+				SELECT 
+					ph.wallet_address as user_wallet,
+					SUM(ph.points) as total_points,
+					COUNT(DISTINCT ph.tx_ref) as completed_tasks,
+					o.override_points,
+					CASE WHEN o.created_at IS NOT NULL AND ph.created_at > o.created_at THEN 1 ELSE 0 END as after_override
+				FROM points_history ph
+				LEFT JOIN subnet_user_points_override o ON o.subnet_id = ? AND o.wallet_address = ph.wallet_address
+				WHERE ph.subnet_id = ?
+					AND ph.source = 'Chat Task'
+				GROUP BY ph.wallet_address, o.override_points, after_override
+				
+				UNION ALL
+				
+				-- Other tasks: subnet_id in tasks table
+				SELECT 
+					ph.wallet_address as user_wallet,
+					SUM(ph.points) as total_points,
+					COUNT(DISTINCT 
+						CASE 
+							WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+							ELSE ph.tx_ref
+						END
+					) as completed_tasks,
+					o.override_points,
+					CASE WHEN o.created_at IS NOT NULL AND ph.created_at > o.created_at THEN 1 ELSE 0 END as after_override
+				FROM points_history ph
+				INNER JOIN tasks t ON (
 					CASE 
 						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
 						ELSE ph.tx_ref
-					END
-				) as completed_tasks,
-				ROW_NUMBER() OVER (ORDER BY SUM(ph.points) DESC) as user_rank
-			FROM points_history ph 
-			LEFT JOIN tasks t ON (
-				CASE 
-					WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
-					ELSE ph.tx_ref
-				END = t.id
-			)
-			WHERE t.subnet_id = ?
-			AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Chat Task')
-			GROUP BY ph.wallet_address
+					END = t.id
+				)
+				LEFT JOIN subnet_user_points_override o ON o.subnet_id = ? AND o.wallet_address = ph.wallet_address
+				WHERE t.subnet_id = ?
+					AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+				GROUP BY ph.wallet_address, o.override_points, after_override
+			) AS subnet_points
+			GROUP BY user_wallet, override_points
 		) ranked_users
 		LEFT JOIN user_profiles up ON ranked_users.user_wallet = up.wallet_address
 		ORDER BY ranked_users.user_rank
 		LIMIT ? OFFSET ?
 	`
 
-	rows, err := ss.db.QueryContext(ctx, query, subnetID, limit, offset)
+	rows, err := ss.db.QueryContext(ctx, query, subnetID, subnetID, subnetID, subnetID, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to query subnet user ranking: %v", err)
 	}
@@ -796,7 +911,7 @@ func (ss *StatsService) GetActiveTasksCount(ctx context.Context) (int, error) {
 	return activeTasks, nil
 }
 
-// GetSubnetLeaders gets top 3 users by points in each subnet with pagination
+// GetSubnetLeaders gets top 3 users by points in each subnet with pagination (with override support)
 func (ss *StatsService) GetSubnetLeaders(ctx context.Context, limit, offset int) ([]*SubnetLeader, int, error) {
 	// Get total count of subnets first
 	countQuery := `SELECT COUNT(*) FROM subnets WHERE status = 'active'`
@@ -806,7 +921,7 @@ func (ss *StatsService) GetSubnetLeaders(ctx context.Context, limit, offset int)
 		return nil, 0, fmt.Errorf("failed to get subnets count: %v", err)
 	}
 
-	// Get top 3 users per subnet with pagination
+	// Get top 3 users per subnet with override support
 	query := `
 		SELECT 
 			ranked_users.subnet_id,
@@ -819,14 +934,66 @@ func (ss *StatsService) GetSubnetLeaders(ctx context.Context, limit, offset int)
 			ranked_users.rank_in_subnet
 		FROM (
 			SELECT 
-				utc.subnet_id,
-				utc.user_wallet,
-				COALESCE(SUM(ph.points), SUM(utc.points_earned)) as total_points,
-				COUNT(DISTINCT utc.task_id) as completed_tasks,
-				ROW_NUMBER() OVER (PARTITION BY utc.subnet_id ORDER BY COALESCE(SUM(ph.points), SUM(utc.points_earned)) DESC) as rank_in_subnet
-			FROM user_task_completions utc
-			LEFT JOIN points_history ph ON ph.tx_ref LIKE CONCAT('pocw-consensus-', utc.task_id) AND ph.wallet_address = utc.user_wallet
-			GROUP BY utc.subnet_id, utc.user_wallet
+				subnet_id,
+				user_wallet,
+				CASE 
+					WHEN override_points IS NOT NULL 
+					THEN override_points + COALESCE(SUM(CASE WHEN after_override = 1 THEN total_points ELSE 0 END), 0)
+					ELSE SUM(total_points)
+				END as total_points,
+				SUM(completed_tasks) as completed_tasks,
+				ROW_NUMBER() OVER (
+					PARTITION BY subnet_id 
+					ORDER BY 
+						CASE 
+							WHEN override_points IS NOT NULL 
+							THEN override_points + COALESCE(SUM(CASE WHEN after_override = 1 THEN total_points ELSE 0 END), 0)
+							ELSE SUM(total_points)
+						END DESC
+				) as rank_in_subnet
+			FROM (
+				-- Chat Task: direct subnet_id in points_history
+				SELECT 
+					ph.subnet_id,
+					ph.wallet_address as user_wallet,
+					SUM(ph.points) as total_points,
+					COUNT(DISTINCT ph.tx_ref) as completed_tasks,
+					o.override_points,
+					CASE WHEN o.created_at IS NOT NULL AND ph.created_at > o.created_at THEN 1 ELSE 0 END as after_override
+				FROM points_history ph
+				LEFT JOIN subnet_user_points_override o ON o.subnet_id = ph.subnet_id AND o.wallet_address = ph.wallet_address
+				WHERE ph.subnet_id IS NOT NULL
+					AND ph.source = 'Chat Task'
+				GROUP BY ph.subnet_id, ph.wallet_address, o.override_points, after_override
+				
+				UNION ALL
+				
+				-- Other tasks: subnet_id in tasks table
+				SELECT 
+					t.subnet_id,
+					ph.wallet_address as user_wallet,
+					SUM(ph.points) as total_points,
+					COUNT(DISTINCT 
+						CASE 
+							WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+							ELSE ph.tx_ref
+						END
+					) as completed_tasks,
+					o.override_points,
+					CASE WHEN o.created_at IS NOT NULL AND ph.created_at > o.created_at THEN 1 ELSE 0 END as after_override
+				FROM points_history ph
+				INNER JOIN tasks t ON (
+					CASE 
+						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+						ELSE ph.tx_ref
+					END = t.id
+				)
+				LEFT JOIN subnet_user_points_override o ON o.subnet_id = t.subnet_id AND o.wallet_address = ph.wallet_address
+				WHERE t.subnet_id IS NOT NULL
+					AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+				GROUP BY t.subnet_id, ph.wallet_address, o.override_points, after_override
+			) AS subnet_points
+			GROUP BY subnet_id, user_wallet, override_points
 		) ranked_users
 		INNER JOIN subnets s ON ranked_users.subnet_id = s.id
 		LEFT JOIN user_profiles up ON ranked_users.user_wallet = up.wallet_address
@@ -1035,7 +1202,7 @@ func (ss *StatsService) GetSubnetsDailyPoints(ctx context.Context, days int, sub
 		INNER JOIN tasks t ON t.subnet_id = s.id
 		INNER JOIN points_history ph ON (
 			ph.subnet_id IS NULL
-			AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task')
+			AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
 			AND ph.created_at IS NOT NULL
 			AND DATE(ph.created_at) BETWEEN DATE_SUB(CURDATE(), INTERVAL ? DAY) AND CURDATE()
 			AND t.id = CASE 
@@ -1131,20 +1298,280 @@ func (ss *StatsService) GetSubnetsDailyPoints(ctx context.Context, days int, sub
 		return nil, fmt.Errorf("failed to get current date: %v", err)
 	}
 
-	// Fill missing dates and calculate totals
+	// Fill missing dates and calculate totals (with override support)
 	result := make([]*SubnetDailyPoints, 0, len(subnetMap))
 	for _, subnet := range subnetMap {
 		// Fill missing dates with zeros (using database date)
 		subnet.DailyPoints = fillMissingDatesFromEnd(subnet.DailyPoints, days, dbDate)
 
-		// Calculate totals
-		total := 0
+		// Calculate task points sum
+		taskPointsSum := 0
 		for _, daily := range subnet.DailyPoints {
-			total += daily.Points
+			taskPointsSum += daily.Points
 		}
-		subnet.Total7Days = total
+		subnet.TaskPointsSum = taskPointsSum
+
+		// Calculate override adjustments for this subnet
+		overrideAdjustment := 0
+		overrideQuery := `
+			SELECT 
+				o.wallet_address,
+				o.override_points,
+				o.created_at
+			FROM subnet_user_points_override o
+			WHERE o.subnet_id = ?
+		`
+
+		overrideRows, err := ss.db.QueryContext(ctx, overrideQuery, subnet.SubnetID)
+		if err == nil {
+			defer overrideRows.Close()
+
+			for overrideRows.Next() {
+				var wallet string
+				var overridePoints int
+				var overrideTime time.Time
+
+				if err := overrideRows.Scan(&wallet, &overridePoints, &overrideTime); err == nil {
+					// Calculate points before override for this user
+					var pointsBeforeOverride int
+					err := ss.db.QueryRowContext(ctx, `
+						SELECT COALESCE(SUM(points), 0) FROM (
+							SELECT SUM(ph.points) as points
+							FROM points_history ph
+							WHERE ph.wallet_address = ?
+								AND ph.subnet_id = ?
+								AND ph.source = 'Chat Task'
+								AND ph.created_at < ?
+							
+							UNION ALL
+							
+							SELECT SUM(ph.points) as points
+							FROM points_history ph
+							INNER JOIN tasks t ON (
+								CASE 
+									WHEN ph.tx_ref LIKE 'pocw-consensus-%' 
+									THEN SUBSTRING(ph.tx_ref, 16)
+									ELSE ph.tx_ref
+								END = t.id
+							)
+							WHERE ph.wallet_address = ?
+								AND t.subnet_id = ?
+								AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+								AND ph.created_at < ?
+						) AS points_before
+					`, wallet, subnet.SubnetID, overrideTime, wallet, subnet.SubnetID, overrideTime).Scan(&pointsBeforeOverride)
+
+					if err == nil {
+						// Adjustment = override_points - points_before_override
+						adjustment := overridePoints - pointsBeforeOverride
+						overrideAdjustment += adjustment
+					}
+				}
+			}
+		}
+
+		subnet.OverrideAdjustment = overrideAdjustment
+		subnet.Total7Days = taskPointsSum + overrideAdjustment
+
 		if days > 0 {
-			subnet.AvgPerDay = float64(total) / float64(days)
+			subnet.AvgPerDay = float64(subnet.Total7Days) / float64(days)
+		}
+
+		result = append(result, subnet)
+	}
+
+	return result, nil
+}
+
+// GetChatTasksDailyPoints gets daily points for chat tasks in all subnets over the past N days
+func (ss *StatsService) GetChatTasksDailyPoints(ctx context.Context, days int, subnetID string) ([]*SubnetDailyPoints, error) {
+	if days <= 0 || days > 30 {
+		days = 7 // Default to 7 days, max 30
+	}
+
+	// Build WHERE clause for optional subnet filter
+	subnetFilter := ""
+	daysParam := days - 1
+	var args []interface{}
+
+	if subnetID != "" {
+		subnetFilter = "AND s.id = ?"
+		args = []interface{}{daysParam, subnetID}
+	} else {
+		args = []interface{}{daysParam}
+	}
+
+	// Query chat task daily points data
+	// Only query Chat Task source with direct subnet_id
+	query := fmt.Sprintf(`
+		SELECT 
+			s.id as subnet_id,
+			s.name as subnet_name,
+			s.icon as subnet_icon,
+			DATE(ph.created_at) as date,
+			SUM(ph.points) as points,
+			COUNT(DISTINCT ph.wallet_address) as chat_users
+		FROM subnets s
+		INNER JOIN points_history ph ON ph.subnet_id = s.id 
+			AND ph.source = 'Chat Task'
+			AND ph.created_at IS NOT NULL
+			AND DATE(ph.created_at) BETWEEN DATE_SUB(CURDATE(), INTERVAL ? DAY) AND CURDATE()
+		WHERE s.status = 'active' %s
+		GROUP BY s.id, s.name, s.icon, DATE(ph.created_at)
+		ORDER BY s.id, date
+	`, subnetFilter)
+
+	rows, err := ss.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query chat tasks daily points: %v", err)
+	}
+	defer rows.Close()
+
+	// Organize data by subnet and date
+	type dateKey struct {
+		subnetID string
+		date     string
+	}
+	dateDataMap := make(map[dateKey]*DailyPointsData)
+	subnetInfoMap := make(map[string]struct {
+		name string
+		icon string
+	})
+
+	for rows.Next() {
+		var subnetID, subnetName, subnetIcon string
+		var date sql.NullString
+		var points, chatUsers int
+
+		err := rows.Scan(&subnetID, &subnetName, &subnetIcon, &date, &points, &chatUsers)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan row: %v", err)
+		}
+
+		// Store subnet info
+		if _, exists := subnetInfoMap[subnetID]; !exists {
+			subnetInfoMap[subnetID] = struct {
+				name string
+				icon string
+			}{name: subnetName, icon: subnetIcon}
+		}
+
+		// Store daily data
+		if date.Valid {
+			// Extract only date part (YYYY-MM-DD) from datetime string
+			dateStr := date.String
+			if len(dateStr) >= 10 {
+				dateStr = dateStr[:10]
+			}
+
+			dateDataMap[dateKey{subnetID: subnetID, date: dateStr}] = &DailyPointsData{
+				Date:        dateStr,
+				Points:      points,
+				ActiveUsers: chatUsers, // This is the number of chat users per day
+			}
+		}
+	}
+
+	// Get end date from database (to match MySQL timezone)
+	var dbDate string
+	err = ss.db.QueryRowContext(ctx, "SELECT CURDATE()").Scan(&dbDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current date: %v", err)
+	}
+
+	// Organize by subnet
+	subnetMap := make(map[string]*SubnetDailyPoints)
+	for key, data := range dateDataMap {
+		if _, exists := subnetMap[key.subnetID]; !exists {
+			info := subnetInfoMap[key.subnetID]
+			subnetMap[key.subnetID] = &SubnetDailyPoints{
+				SubnetID:    key.subnetID,
+				SubnetName:  info.name,
+				SubnetIcon:  info.icon,
+				DailyPoints: []DailyPointsData{},
+			}
+		}
+		subnetMap[key.subnetID].DailyPoints = append(subnetMap[key.subnetID].DailyPoints, *data)
+	}
+
+	// Fill missing dates and calculate totals (with override support - chat tasks only)
+	result := make([]*SubnetDailyPoints, 0, len(subnetMap))
+	for _, subnet := range subnetMap {
+		// Fill missing dates with zeros (using database date)
+		subnet.DailyPoints = fillMissingDatesFromEnd(subnet.DailyPoints, days, dbDate)
+
+		// Calculate task points sum (chat tasks only)
+		taskPointsSum := 0
+		for _, daily := range subnet.DailyPoints {
+			taskPointsSum += daily.Points
+		}
+		subnet.TaskPointsSum = taskPointsSum
+
+		// Calculate override adjustments for this subnet
+		// Note: For chat tasks endpoint, we still calculate total override adjustment
+		overrideAdjustment := 0
+		overrideQuery := `
+			SELECT 
+				o.wallet_address,
+				o.override_points,
+				o.created_at
+			FROM subnet_user_points_override o
+			WHERE o.subnet_id = ?
+		`
+
+		overrideRows, err := ss.db.QueryContext(ctx, overrideQuery, subnet.SubnetID)
+		if err == nil {
+			defer overrideRows.Close()
+
+			for overrideRows.Next() {
+				var wallet string
+				var overridePoints int
+				var overrideTime time.Time
+
+				if err := overrideRows.Scan(&wallet, &overridePoints, &overrideTime); err == nil {
+					// Calculate points before override for this user
+					var pointsBeforeOverride int
+					err := ss.db.QueryRowContext(ctx, `
+						SELECT COALESCE(SUM(points), 0) FROM (
+							SELECT SUM(ph.points) as points
+							FROM points_history ph
+							WHERE ph.wallet_address = ?
+								AND ph.subnet_id = ?
+								AND ph.source = 'Chat Task'
+								AND ph.created_at < ?
+							
+							UNION ALL
+							
+							SELECT SUM(ph.points) as points
+							FROM points_history ph
+							INNER JOIN tasks t ON (
+								CASE 
+									WHEN ph.tx_ref LIKE 'pocw-consensus-%' 
+									THEN SUBSTRING(ph.tx_ref, 16)
+									ELSE ph.tx_ref
+								END = t.id
+							)
+							WHERE ph.wallet_address = ?
+								AND t.subnet_id = ?
+								AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+								AND ph.created_at < ?
+						) AS points_before
+					`, wallet, subnet.SubnetID, overrideTime, wallet, subnet.SubnetID, overrideTime).Scan(&pointsBeforeOverride)
+
+					if err == nil {
+						// Adjustment = override_points - points_before_override
+						adjustment := overridePoints - pointsBeforeOverride
+						overrideAdjustment += adjustment
+					}
+				}
+			}
+		}
+
+		subnet.OverrideAdjustment = overrideAdjustment
+		subnet.Total7Days = taskPointsSum + overrideAdjustment
+
+		if days > 0 {
+			subnet.AvgPerDay = float64(subnet.Total7Days) / float64(days)
 		}
 
 		result = append(result, subnet)
@@ -1185,4 +1612,224 @@ func fillMissingDatesFromEnd(dailyPoints []DailyPointsData, days int, endDate st
 	}
 
 	return result
+}
+
+// ============================================
+// Points Override System
+// ============================================
+
+// PointsOverride represents a points override record
+type PointsOverride struct {
+	ID             int       `json:"id" db:"id"`
+	SubnetID       string    `json:"subnet_id" db:"subnet_id"`
+	WalletAddress  string    `json:"wallet_address" db:"wallet_address"`
+	OverridePoints int       `json:"override_points" db:"override_points"`
+	AdminWallet    string    `json:"admin_wallet" db:"admin_wallet"`
+	Reason         string    `json:"reason" db:"reason"`
+	CreatedAt      time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// GetUserSubnetTotalPoints calculates user's total points in a subnet (considering override)
+func (ss *StatsService) GetUserSubnetTotalPoints(ctx context.Context, subnetID, walletAddress string) (int, bool, error) {
+	// Check if there's an override record
+	var overridePoints sql.NullInt32
+	var overrideTime sql.NullTime
+
+	err := ss.db.QueryRowContext(ctx, `
+		SELECT override_points, created_at
+		FROM subnet_user_points_override 
+		WHERE subnet_id = ? AND wallet_address = ?
+	`, subnetID, walletAddress).Scan(&overridePoints, &overrideTime)
+
+	if err != nil && err != sql.ErrNoRows {
+		return 0, false, fmt.Errorf("failed to query override: %v", err)
+	}
+
+	hasOverride := overridePoints.Valid
+
+	// If no override, sum all points from points_history
+	if !hasOverride {
+		var totalPoints int
+		err = ss.db.QueryRowContext(ctx, `
+			SELECT COALESCE(SUM(points), 0) FROM (
+				-- Chat Task: direct subnet_id
+				SELECT SUM(ph.points) as points
+				FROM points_history ph
+				WHERE ph.wallet_address = ?
+					AND ph.subnet_id = ?
+					AND ph.source = 'Chat Task'
+				
+				UNION ALL
+				
+				-- Other tasks: subnet_id in tasks table
+				SELECT SUM(ph.points) as points
+				FROM points_history ph
+				INNER JOIN tasks t ON (
+					CASE 
+						WHEN ph.tx_ref LIKE 'pocw-consensus-%' 
+						THEN SUBSTRING(ph.tx_ref, 16)
+						ELSE ph.tx_ref
+					END = t.id
+				)
+				WHERE ph.wallet_address = ?
+					AND t.subnet_id = ?
+					AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+			) AS all_points
+		`, walletAddress, subnetID, walletAddress, subnetID).Scan(&totalPoints)
+
+		return totalPoints, false, err
+	}
+
+	// If override exists, calculate: override_points + points after override time
+	var pointsAfterOverride int
+	err = ss.db.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(points), 0) FROM (
+			-- Chat Task: direct subnet_id
+			SELECT SUM(ph.points) as points
+			FROM points_history ph
+			WHERE ph.wallet_address = ?
+				AND ph.subnet_id = ?
+				AND ph.source = 'Chat Task'
+				AND ph.created_at > ?
+			
+			UNION ALL
+			
+			-- Other tasks: subnet_id in tasks table
+			SELECT SUM(ph.points) as points
+			FROM points_history ph
+			INNER JOIN tasks t ON (
+				CASE 
+					WHEN ph.tx_ref LIKE 'pocw-consensus-%' 
+					THEN SUBSTRING(ph.tx_ref, 16)
+					ELSE ph.tx_ref
+				END = t.id
+			)
+			WHERE ph.wallet_address = ?
+				AND t.subnet_id = ?
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+				AND ph.created_at > ?
+		) AS points_after_override
+	`, walletAddress, subnetID, overrideTime.Time, walletAddress, subnetID, overrideTime.Time).Scan(&pointsAfterOverride)
+
+	if err != nil {
+		return 0, true, fmt.Errorf("failed to query points after override: %v", err)
+	}
+
+	totalPoints := int(overridePoints.Int32) + pointsAfterOverride
+	return totalPoints, true, nil
+}
+
+// SetPointsOverride sets or updates a points override for a user in a subnet
+func (ss *StatsService) SetPointsOverride(ctx context.Context, subnetID, walletAddress string, overridePoints int, adminWallet, reason string) error {
+	query := `
+		INSERT INTO subnet_user_points_override (
+			subnet_id, wallet_address, override_points, admin_wallet, reason, created_at
+		) VALUES (?, ?, ?, ?, ?, NOW())
+		ON DUPLICATE KEY UPDATE 
+			override_points = VALUES(override_points),
+			admin_wallet = VALUES(admin_wallet),
+			reason = VALUES(reason),
+			created_at = NOW(),
+			updated_at = NOW()
+	`
+
+	_, err := ss.db.ExecContext(ctx, query, subnetID, walletAddress, overridePoints, adminWallet, reason)
+	if err != nil {
+		return fmt.Errorf("failed to set points override: %v", err)
+	}
+
+	return nil
+}
+
+// RemovePointsOverride removes a points override for a user in a subnet
+func (ss *StatsService) RemovePointsOverride(ctx context.Context, subnetID, walletAddress string) error {
+	query := `
+		DELETE FROM subnet_user_points_override 
+		WHERE subnet_id = ? AND wallet_address = ?
+	`
+
+	result, err := ss.db.ExecContext(ctx, query, subnetID, walletAddress)
+	if err != nil {
+		return fmt.Errorf("failed to remove points override: %v", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %v", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("no override found for subnet %s and wallet %s", subnetID, walletAddress)
+	}
+
+	return nil
+}
+
+// GetPointsOverride retrieves the points override for a user in a subnet
+func (ss *StatsService) GetPointsOverride(ctx context.Context, subnetID, walletAddress string) (*PointsOverride, error) {
+	query := `
+		SELECT id, subnet_id, wallet_address, override_points, admin_wallet, reason, created_at, updated_at
+		FROM subnet_user_points_override 
+		WHERE subnet_id = ? AND wallet_address = ?
+	`
+
+	var override PointsOverride
+	err := ss.db.QueryRowContext(ctx, query, subnetID, walletAddress).Scan(
+		&override.ID,
+		&override.SubnetID,
+		&override.WalletAddress,
+		&override.OverridePoints,
+		&override.AdminWallet,
+		&override.Reason,
+		&override.CreatedAt,
+		&override.UpdatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get points override: %v", err)
+	}
+
+	return &override, nil
+}
+
+// GetSubnetOverrides retrieves all points overrides for a subnet
+func (ss *StatsService) GetSubnetOverrides(ctx context.Context, subnetID string) ([]*PointsOverride, error) {
+	query := `
+		SELECT id, subnet_id, wallet_address, override_points, admin_wallet, reason, created_at, updated_at
+		FROM subnet_user_points_override 
+		WHERE subnet_id = ?
+		ORDER BY created_at DESC
+	`
+
+	rows, err := ss.db.QueryContext(ctx, query, subnetID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query subnet overrides: %v", err)
+	}
+	defer rows.Close()
+
+	var overrides []*PointsOverride
+	for rows.Next() {
+		var override PointsOverride
+		err := rows.Scan(
+			&override.ID,
+			&override.SubnetID,
+			&override.WalletAddress,
+			&override.OverridePoints,
+			&override.AdminWallet,
+			&override.Reason,
+			&override.CreatedAt,
+			&override.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan override row: %v", err)
+		}
+		overrides = append(overrides, &override)
+	}
+
+	return overrides, nil
 }

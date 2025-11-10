@@ -597,6 +597,49 @@ func (sh *StatsHandler) GetSubnetsDailyPoints(c *gin.Context) {
 	})
 }
 
+// GetChatTasksDailyPoints gets daily points for chat tasks in all subnets over the past N days
+func (sh *StatsHandler) GetChatTasksDailyPoints(c *gin.Context) {
+	// Parse days parameter (default 7, max 30)
+	days := 7
+	if daysParam := c.Query("days"); daysParam != "" {
+		if parsedDays, err := strconv.Atoi(daysParam); err == nil && parsedDays > 0 && parsedDays <= 30 {
+			days = parsedDays
+		}
+	}
+
+	// Optional subnet_id filter
+	subnetID := c.Query("subnet_id")
+
+	// Query data
+	chatTasks, err := sh.statsService.GetChatTasksDailyPoints(c.Request.Context(), days, subnetID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to get chat tasks daily points: " + err.Error(),
+		})
+		return
+	}
+
+	// Calculate date range for response
+	startDate := ""
+	endDate := ""
+	if len(chatTasks) > 0 && len(chatTasks[0].DailyPoints) > 0 {
+		startDate = chatTasks[0].DailyPoints[0].Date
+		endDate = chatTasks[0].DailyPoints[len(chatTasks[0].DailyPoints)-1].Date
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"start_date":  startDate,
+			"end_date":    endDate,
+			"days":        days,
+			"chat_tasks":  chatTasks,
+			"total_count": len(chatTasks),
+		},
+	})
+}
+
 // RegisterRoutes registers HTTP routes for stats
 func (sh *StatsHandler) RegisterRoutes(router *gin.RouterGroup) {
 	stats := router.Group("/stats")
@@ -623,10 +666,231 @@ func (sh *StatsHandler) RegisterRoutes(router *gin.RouterGroup) {
 		stats.GET("/subnets/:subnet_id/users-count", sh.GetSubnetUsersCount)
 		stats.GET("/subnets/:subnet_id/ranking", sh.GetSubnetUserRanking)
 
+		// Chat task statistics
+		stats.GET("/chat-tasks/daily-points", sh.GetChatTasksDailyPoints) // NEW: Chat task daily points over N days
+
 		// User statistics
 		stats.GET("/users/ranking", sh.GetUserPointsRanking)
 		stats.GET("/users/:wallet/history", sh.GetUserPointsHistory)
 		stats.GET("/users/:wallet/subnets", sh.GetUserSubnets)
 		stats.GET("/users/:wallet/subnet-summary", sh.GetUserSubnetSummary)
 	}
+
+	// Admin routes for points override
+	admin := router.Group("/admin")
+	{
+		admin.POST("/subnets/:subnet_id/users/:wallet/points-override", sh.SetPointsOverride)
+		admin.DELETE("/subnets/:subnet_id/users/:wallet/points-override", sh.RemovePointsOverride)
+		admin.GET("/subnets/:subnet_id/users/:wallet/points-override", sh.GetPointsOverride)
+		admin.GET("/subnets/:subnet_id/points-overrides", sh.GetSubnetOverrides)
+	}
+}
+
+// ============================================
+// Points Override Handlers
+// ============================================
+
+// SetPointsOverride handles setting/updating a points override
+func (sh *StatsHandler) SetPointsOverride(c *gin.Context) {
+	subnetID := c.Param("subnet_id")
+	walletAddress := c.Param("wallet")
+
+	if subnetID == "" || walletAddress == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "subnet_id and wallet are required",
+		})
+		return
+	}
+
+	var req struct {
+		OverridePoints int    `json:"override_points" binding:"required,min=0"`
+		AdminWallet    string `json:"admin_wallet" binding:"required"`
+		Reason         string `json:"reason"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid request: " + err.Error(),
+		})
+		return
+	}
+
+	// TODO: Verify admin permissions (subnet creator or whitelist user)
+	// For now, we trust the admin_wallet from request
+
+	err := sh.statsService.SetPointsOverride(
+		c.Request.Context(),
+		subnetID,
+		walletAddress,
+		req.OverridePoints,
+		req.AdminWallet,
+		req.Reason,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to set points override: " + err.Error(),
+		})
+		return
+	}
+
+	// Get the new total points
+	totalPoints, hasOverride, err := sh.statsService.GetUserSubnetTotalPoints(
+		c.Request.Context(),
+		subnetID,
+		walletAddress,
+	)
+
+	if err != nil {
+		// Override was set but failed to get total, still return success
+		c.JSON(http.StatusOK, gin.H{
+			"success":      true,
+			"message":      "Points override set successfully",
+			"subnet_id":    subnetID,
+			"wallet":       walletAddress,
+			"has_override": hasOverride,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":      true,
+		"message":      "Points override set successfully",
+		"subnet_id":    subnetID,
+		"wallet":       walletAddress,
+		"total_points": totalPoints,
+		"has_override": hasOverride,
+	})
+}
+
+// RemovePointsOverride handles removing a points override
+func (sh *StatsHandler) RemovePointsOverride(c *gin.Context) {
+	subnetID := c.Param("subnet_id")
+	walletAddress := c.Param("wallet")
+
+	if subnetID == "" || walletAddress == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "subnet_id and wallet are required",
+		})
+		return
+	}
+
+	// TODO: Verify admin permissions
+
+	err := sh.statsService.RemovePointsOverride(c.Request.Context(), subnetID, walletAddress)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to remove points override: " + err.Error(),
+		})
+		return
+	}
+
+	// Get the new total points (should be back to SUM of points_history)
+	totalPoints, hasOverride, err := sh.statsService.GetUserSubnetTotalPoints(
+		c.Request.Context(),
+		subnetID,
+		walletAddress,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success":   true,
+			"message":   "Points override removed successfully",
+			"subnet_id": subnetID,
+			"wallet":    walletAddress,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":      true,
+		"message":      "Points override removed successfully",
+		"subnet_id":    subnetID,
+		"wallet":       walletAddress,
+		"total_points": totalPoints,
+		"has_override": hasOverride,
+	})
+}
+
+// GetPointsOverride handles retrieving a points override
+func (sh *StatsHandler) GetPointsOverride(c *gin.Context) {
+	subnetID := c.Param("subnet_id")
+	walletAddress := c.Param("wallet")
+
+	if subnetID == "" || walletAddress == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "subnet_id and wallet are required",
+		})
+		return
+	}
+
+	override, err := sh.statsService.GetPointsOverride(c.Request.Context(), subnetID, walletAddress)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to get points override: " + err.Error(),
+		})
+		return
+	}
+
+	if override == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success":      true,
+			"has_override": false,
+			"subnet_id":    subnetID,
+			"wallet":       walletAddress,
+		})
+		return
+	}
+
+	// Get current total points
+	totalPoints, _, err := sh.statsService.GetUserSubnetTotalPoints(
+		c.Request.Context(),
+		subnetID,
+		walletAddress,
+	)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":      true,
+		"has_override": true,
+		"override":     override,
+		"total_points": totalPoints,
+	})
+}
+
+// GetSubnetOverrides handles retrieving all points overrides for a subnet
+func (sh *StatsHandler) GetSubnetOverrides(c *gin.Context) {
+	subnetID := c.Param("subnet_id")
+
+	if subnetID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "subnet_id is required",
+		})
+		return
+	}
+
+	// TODO: Verify admin permissions
+
+	overrides, err := sh.statsService.GetSubnetOverrides(c.Request.Context(), subnetID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to get subnet overrides: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":   true,
+		"subnet_id": subnetID,
+		"count":     len(overrides),
+		"overrides": overrides,
+	})
 }

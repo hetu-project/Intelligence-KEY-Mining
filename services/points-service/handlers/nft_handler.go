@@ -355,6 +355,7 @@ func (nh *NFTHandler) RegisterRoutes(router *gin.RouterGroup) {
 		points.POST("/invitation-reward", nh.HandleInvitationReward)
 		points.POST("/telegram-task-reward", nh.HandleTelegramTaskReward)
 		points.POST("/twitter-post-reward", nh.HandleTwitterPostReward)
+		points.POST("/twitter-follow-reward", nh.HandleTwitterFollowReward)
 		points.POST("/chat-task-reward", nh.HandleChatTaskReward) // NEW: Chat task reward
 
 		// User completed tasks query
@@ -698,5 +699,88 @@ func (nh *NFTHandler) HandleTwitterPostReward(c *gin.Context) {
 		NewTotal:    newTotal,
 		HasNFT:      hasNFT,
 		Message:     "Twitter post reward added successfully",
+	})
+}
+
+// HandleTwitterFollowReward handles Twitter follow task reward points
+func (nh *NFTHandler) HandleTwitterFollowReward(c *gin.Context) {
+	var req models.TwitterFollowRewardRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid request format: " + err.Error(),
+		})
+		return
+	}
+
+	// Validate required fields
+	if req.UserWallet == "" || req.TaskID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "user_wallet and task_id are required",
+		})
+		return
+	}
+
+	// Lookup subnet_id from tasks table
+	subnetID, err := nh.pointsService.GetTaskSubnetID(c.Request.Context(), req.TaskID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Failed to resolve task subnet: " + err.Error(),
+		})
+		return
+	}
+
+	// Check if user has NFT for bonus calculation (currently globally disabled in NFT service)
+	hasNFT, err := nh.nftService.CheckUserNFTOwnership(c.Request.Context(), req.UserWallet)
+	if err != nil {
+		hasNFT = false
+	}
+
+	// Calculate reward points
+	rewardPoints := 1
+	if hasNFT {
+		rewardPoints = 2
+	}
+
+	// Add points to user (tx_ref = task_id, subnet_id remains NULL for non-chat tasks)
+	err = nh.pointsService.AddDirectPoints(c.Request.Context(), &models.DirectPointsRequest{
+		UserWallet:  req.UserWallet,
+		Points:      rewardPoints,
+		Source:      models.PointsSourceTwitterFollow,
+		Description: "Twitter Follow Task Reward",
+		Reference:   req.TaskID,
+		Metadata: map[string]interface{}{
+			"task_id":        req.TaskID,
+			"has_nft":        hasNFT,
+			"base_reward":    1,
+			"nft_multiplier": hasNFT,
+		},
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to add Twitter follow reward: " + err.Error(),
+		})
+		return
+	}
+
+	// Compute new total for this subnet including override logic
+	newTotal := 0
+	if subnetID != "" {
+		if total, err2 := nh.pointsService.GetUserSubnetTotalPoints(c.Request.Context(), subnetID, req.UserWallet); err2 == nil {
+			newTotal = total
+		}
+	}
+
+	c.JSON(http.StatusOK, &models.TwitterFollowRewardResponse{
+		Success:     true,
+		UserWallet:  req.UserWallet,
+		TaskID:      req.TaskID,
+		PointsAdded: rewardPoints,
+		NewTotal:    newTotal,
+		HasNFT:      hasNFT,
+		Message:     "Twitter follow reward added successfully",
 	})
 }

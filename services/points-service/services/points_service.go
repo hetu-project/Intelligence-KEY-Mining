@@ -399,6 +399,108 @@ func (ps *PointsService) GetUserPoints(ctx context.Context, walletAddress string
 	return totalPoints, nil
 }
 
+// GetTaskSubnetID returns subnet_id for a given task id
+func (ps *PointsService) GetTaskSubnetID(ctx context.Context, taskID string) (string, error) {
+	query := `SELECT subnet_id FROM tasks WHERE id = ?`
+	var subnetID sql.NullString
+	err := ps.db.QueryRowContext(ctx, query, taskID).Scan(&subnetID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", fmt.Errorf("task not found: %s", taskID)
+		}
+		return "", fmt.Errorf("failed to get task subnet: %v", err)
+	}
+	if !subnetID.Valid {
+		return "", nil
+	}
+	return subnetID.String, nil
+}
+
+// GetUserSubnetTotalPoints calculates user's total points in a subnet (considering override snapshot + incremental)
+func (ps *PointsService) GetUserSubnetTotalPoints(ctx context.Context, subnetID, walletAddress string) (int, error) {
+	// Check override
+	var overridePoints sql.NullInt32
+	var overrideTime sql.NullTime
+	err := ps.db.QueryRowContext(ctx, `
+		SELECT override_points, created_at
+		FROM subnet_user_points_override 
+		WHERE subnet_id = ? AND wallet_address = ?
+	`, subnetID, walletAddress).Scan(&overridePoints, &overrideTime)
+	if err != nil && err != sql.ErrNoRows {
+		return 0, fmt.Errorf("failed to query override: %v", err)
+	}
+
+	// If no override, sum all relevant points
+	if !overridePoints.Valid {
+		var totalPoints int
+		err = ps.db.QueryRowContext(ctx, `
+			SELECT COALESCE(SUM(points), 0) FROM (
+				-- Chat Task: direct subnet_id
+				SELECT SUM(ph.points) as points
+				FROM points_history ph
+				WHERE ph.wallet_address = ?
+					AND ph.subnet_id = ?
+					AND ph.source = 'Chat Task'
+				
+				UNION ALL
+				
+				-- Other tasks: subnet_id in tasks table
+				SELECT SUM(ph.points) as points
+				FROM points_history ph
+				INNER JOIN tasks t ON (
+					CASE 
+						WHEN ph.tx_ref LIKE 'pocw-consensus-%' 
+						THEN SUBSTRING(ph.tx_ref, 16)
+						ELSE ph.tx_ref
+					END = t.id
+				)
+				WHERE ph.wallet_address = ?
+					AND t.subnet_id = ?
+					AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+			) AS all_points
+		`, walletAddress, subnetID, walletAddress, subnetID).Scan(&totalPoints)
+		if err != nil {
+			return 0, fmt.Errorf("failed to sum subnet points: %v", err)
+		}
+		return totalPoints, nil
+	}
+
+	// Override exists: add points after override time
+	var pointsAfterOverride int
+	err = ps.db.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(points), 0) FROM (
+			-- Chat Task: direct subnet_id
+			SELECT SUM(ph.points) as points
+			FROM points_history ph
+			WHERE ph.wallet_address = ?
+				AND ph.subnet_id = ?
+				AND ph.source = 'Chat Task'
+				AND ph.created_at > ?
+			
+			UNION ALL
+			
+			-- Other tasks: subnet_id in tasks table
+			SELECT SUM(ph.points) as points
+			FROM points_history ph
+			INNER JOIN tasks t ON (
+				CASE 
+					WHEN ph.tx_ref LIKE 'pocw-consensus-%' 
+					THEN SUBSTRING(ph.tx_ref, 16)
+					ELSE ph.tx_ref
+				END = t.id
+			)
+			WHERE ph.wallet_address = ?
+				AND t.subnet_id = ?
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+				AND ph.created_at > ?
+		) AS points_after_override
+	`, walletAddress, subnetID, overrideTime.Time, walletAddress, subnetID, overrideTime.Time).Scan(&pointsAfterOverride)
+	if err != nil {
+		return 0, fmt.Errorf("failed to sum points after override: %v", err)
+	}
+	return int(overridePoints.Int32) + pointsAfterOverride, nil
+}
+
 // GetPointsHistory gets user points history
 func (ps *PointsService) GetPointsHistory(ctx context.Context, walletAddress string, limit int) ([]models.PointsRecord, error) {
 	if limit <= 0 || limit > ps.config.HistoryLimit {
