@@ -82,6 +82,8 @@ func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, 
 			source = models.PointsSourceVLCDistribution // twitter_retweet tasks generate VLC Distribution points
 		case "twitter_post":
 			source = models.PointsSourceTwitterPost
+		case "twitter_follow":
+			source = models.PointsSourceTwitterFollow
 		case "telegram_task":
 			source = models.PointsSourceTelegramTask
 		case "task_creation":
@@ -168,6 +170,8 @@ func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, 
 			task.TaskType = "task_creation"
 		case models.PointsSourceTwitterPost:
 			task.TaskType = "twitter_post"
+		case models.PointsSourceTwitterFollow:
+			task.TaskType = "twitter_follow"
 		case models.PointsSourceChatTask:
 			task.TaskType = "chat"
 		default:
@@ -852,6 +856,8 @@ func mapSourceToSimpleName(source string) string {
 		return "chat"
 	case models.PointsSourceTwitterPost:
 		return "twitter_post"
+	case models.PointsSourceTwitterFollow:
+		return "twitter_follow"
 	case models.PointsSourceVLCDistribution:
 		return "twitter_retweet"
 	case models.PointsSourceTelegramTask:

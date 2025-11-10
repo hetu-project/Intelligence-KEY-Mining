@@ -186,7 +186,7 @@ func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, err
 					END = t2.id
 				)
 				WHERE t2.subnet_id = s.id 
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Chat Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task')
 			), 0) as completed_tasks,
 			-- Unique users: count all users who got points for this subnet
 			COALESCE((
@@ -199,7 +199,7 @@ func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, err
 					END = t2.id
 				)
 				WHERE t2.subnet_id = s.id 
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Chat Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task')
 			), 0) as unique_users,
 			-- Total points distributed: sum all points for this subnet
 			COALESCE((
@@ -212,7 +212,7 @@ func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, err
 					END = t2.id
 				)
 				WHERE t2.subnet_id = s.id 
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Chat Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task')
 			), 0) as total_points_distributed,
 			-- Today points distributed: sum today's points for this subnet
 			COALESCE((
@@ -226,7 +226,7 @@ func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, err
 				)
 				WHERE t2.subnet_id = s.id 
 				AND DATE(ph.created_at) = CURDATE()
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Chat Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task')
 			), 0) as today_points_distributed,
 			-- Today active users: count users who got points today for this subnet
 			COALESCE((
@@ -240,7 +240,7 @@ func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, err
 				)
 				WHERE t2.subnet_id = s.id 
 				AND DATE(ph.created_at) = CURDATE()
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Chat Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task')
 			), 0) as today_active_users
 		FROM subnets s
 		LEFT JOIN tasks t ON s.id = t.subnet_id
@@ -305,7 +305,7 @@ func (ss *StatsService) GetSubnetDetails(ctx context.Context, subnetID string) (
 					END = t2.id
 				)
 				WHERE t2.subnet_id = s.id 
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Chat Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task')
 			), 0) as completed_tasks,
 			-- Unique users: count all users who got points for this subnet
 			COALESCE((
@@ -318,7 +318,7 @@ func (ss *StatsService) GetSubnetDetails(ctx context.Context, subnetID string) (
 					END = t2.id
 				)
 				WHERE t2.subnet_id = s.id 
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Chat Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task')
 			), 0) as unique_users,
 			-- Total points distributed: sum all points for this subnet
 			COALESCE((
@@ -331,7 +331,7 @@ func (ss *StatsService) GetSubnetDetails(ctx context.Context, subnetID string) (
 					END = t2.id
 				)
 				WHERE t2.subnet_id = s.id 
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Chat Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task')
 			), 0) as total_points_distributed,
 			-- Today points distributed: sum today's points for this subnet
 			COALESCE((
@@ -345,7 +345,7 @@ func (ss *StatsService) GetSubnetDetails(ctx context.Context, subnetID string) (
 				)
 				WHERE t2.subnet_id = s.id 
 				AND DATE(ph.created_at) = CURDATE()
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Chat Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task')
 			), 0) as today_points_distributed,
 			-- Today active users: count users who got points today for this subnet
 			COALESCE((
@@ -359,7 +359,7 @@ func (ss *StatsService) GetSubnetDetails(ctx context.Context, subnetID string) (
 				)
 				WHERE t2.subnet_id = s.id 
 				AND DATE(ph.created_at) = CURDATE()
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Chat Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task')
 			), 0) as today_active_users
 		FROM subnets s
 		LEFT JOIN tasks t ON s.id = t.subnet_id

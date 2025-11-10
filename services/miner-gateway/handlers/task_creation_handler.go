@@ -75,6 +75,8 @@ func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 		internalTaskType = models.TwitterRetweetTask // Maps to "twitter_retweet"
 	case "twitter_post":
 		internalTaskType = models.TwitterPostTask // Maps to "twitter_post"
+	case "twitter_follow":
+		internalTaskType = models.TwitterFollowTask // Maps to "twitter_follow"
 	case "task_creation":
 		internalTaskType = models.TaskCreationTask // Maps to "task_creation"
 	case "telegram_task":
@@ -82,7 +84,7 @@ func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"message": "Invalid task type. Must be 'twitter_retweet', 'twitter_post', 'task_creation', or 'telegram_task'",
+			"message": "Invalid task type. Must be 'twitter_retweet', 'twitter_post', 'twitter_follow', 'task_creation', or 'telegram_task'",
 		})
 		return
 	}
@@ -195,6 +197,34 @@ func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 			"project_icon": req.ProjectIcon,
 			"description":  req.Description,
 			"subnet_id":    subnetID,
+		}
+
+	case models.TwitterFollowTask:
+		// Validate required Follow fields
+		if strings.TrimSpace(req.Title) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "Twitter follow task requires title",
+			})
+			return
+		}
+		// At least one follow target identifier
+		if req.FollowAccountID == "" && req.FollowAccountHandle == "" && req.FollowAccountURL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "Twitter follow task requires one of follow_account_id, follow_account_handle, or follow_account_url",
+			})
+			return
+		}
+		payload = map[string]interface{}{
+			"project_name":          req.ProjectName,
+			"project_icon":          req.ProjectIcon,
+			"description":           req.Description,
+			"title":                 req.Title,
+			"follow_account_id":     req.FollowAccountID,
+			"follow_account_handle": req.FollowAccountHandle,
+			"follow_account_url":    req.FollowAccountURL,
+			"subnet_id":             subnetID,
 		}
 
 	default:

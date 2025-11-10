@@ -12,6 +12,7 @@ type TaskType string
 const (
 	TwitterRetweetTask TaskType = "twitter_retweet"
 	TwitterPostTask    TaskType = "twitter_post"
+	TwitterFollowTask  TaskType = "twitter_follow"
 	DiscordMessageTask TaskType = "discord_message"
 	EmailConfirmTask   TaskType = "email_confirm"
 	// New task types
@@ -152,6 +153,12 @@ type TaskCreationRequest struct {
 	// Twitter post task fields (required when task_type = "twitter_post")
 	PostID   string `json:"post_id"`   // Required post ID
 	PostLink string `json:"post_link"` // Required post link
+
+	// Twitter follow task fields (required when task_type = "twitter_follow")
+	Title               string `json:"title"`                 // Required: follow task title
+	FollowAccountID     string `json:"follow_account_id"`     // Optional but recommended
+	FollowAccountHandle string `json:"follow_account_handle"` // Optional
+	FollowAccountURL    string `json:"follow_account_url"`    // Optional
 }
 
 // TaskCreationResponse represents task creation response
