@@ -200,30 +200,51 @@ func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 		}
 
 	case models.TwitterFollowTask:
-		// Validate required Follow fields
-		if strings.TrimSpace(req.Title) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"success": false,
-				"message": "Twitter follow task requires title",
-			})
-			return
+		// Set default values for Twitter Follow task
+		title := strings.TrimSpace(req.Title)
+		if title == "" {
+			title = fmt.Sprintf("Follow %s", req.ProjectName)
 		}
-		// At least one follow target identifier
-		if req.FollowAccountID == "" && req.FollowAccountHandle == "" && req.FollowAccountURL == "" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"success": false,
-				"message": "Twitter follow task requires one of follow_account_id, follow_account_handle, or follow_account_url",
-			})
-			return
+
+		followAccountID := req.FollowAccountID
+		followAccountHandle := req.FollowAccountHandle
+		followAccountURL := req.FollowAccountURL
+
+		// If all follow parameters are empty, try to extract from x_url
+		if followAccountID == "" && followAccountHandle == "" && followAccountURL == "" {
+			if req.XURL != "" {
+				followAccountURL = req.XURL
+				// Try to extract handle from X URL
+				if strings.Contains(req.XURL, "x.com/") || strings.Contains(req.XURL, "twitter.com/") {
+					parts := strings.Split(req.XURL, "/")
+					if len(parts) > 0 {
+						handle := parts[len(parts)-1]
+						// Remove query parameters and fragments
+						if idx := strings.Index(handle, "?"); idx != -1 {
+							handle = handle[:idx]
+						}
+						if idx := strings.Index(handle, "#"); idx != -1 {
+							handle = handle[:idx]
+						}
+						if handle != "" {
+							followAccountHandle = handle
+						}
+					}
+				}
+			} else {
+				// If no x_url provided, use project_name as default handle
+				followAccountHandle = strings.ToLower(strings.ReplaceAll(req.ProjectName, " ", ""))
+			}
 		}
+
 		payload = map[string]interface{}{
 			"project_name":          req.ProjectName,
 			"project_icon":          req.ProjectIcon,
 			"description":           req.Description,
-			"title":                 req.Title,
-			"follow_account_id":     req.FollowAccountID,
-			"follow_account_handle": req.FollowAccountHandle,
-			"follow_account_url":    req.FollowAccountURL,
+			"title":                 title,
+			"follow_account_id":     followAccountID,
+			"follow_account_handle": followAccountHandle,
+			"follow_account_url":    followAccountURL,
 			"subnet_id":             subnetID,
 		}
 

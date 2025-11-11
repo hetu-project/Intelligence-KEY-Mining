@@ -803,44 +803,46 @@ func (ss *StatsService) GetSubnetUserRanking(ctx context.Context, subnetID strin
 					END DESC
 				) as user_rank
 			FROM (
-				-- Chat Task: direct subnet_id in points_history
-				SELECT 
-					ph.wallet_address as user_wallet,
-					SUM(ph.points) as total_points,
-					COUNT(DISTINCT ph.tx_ref) as completed_tasks,
-					o.override_points,
-					CASE WHEN o.created_at IS NOT NULL AND ph.created_at > o.created_at THEN 1 ELSE 0 END as after_override
-				FROM points_history ph
-				LEFT JOIN subnet_user_points_override o ON o.subnet_id = ? AND o.wallet_address = ph.wallet_address
-				WHERE ph.subnet_id = ?
-					AND ph.source = 'Chat Task'
-				GROUP BY ph.wallet_address, o.override_points, after_override
-				
-				UNION ALL
-				
-				-- Other tasks: subnet_id in tasks table
-				SELECT 
-					ph.wallet_address as user_wallet,
-					SUM(ph.points) as total_points,
-					COUNT(DISTINCT 
-						CASE 
-							WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
-							ELSE ph.tx_ref
-						END
-					) as completed_tasks,
-					o.override_points,
-					CASE WHEN o.created_at IS NOT NULL AND ph.created_at > o.created_at THEN 1 ELSE 0 END as after_override
-				FROM points_history ph
-				INNER JOIN tasks t ON (
+			-- Chat Task: direct subnet_id in points_history
+			SELECT 
+				ph.wallet_address as user_wallet,
+				SUM(ph.points) as total_points,
+				COUNT(DISTINCT ph.tx_ref) as completed_tasks,
+				o.override_points,
+				CASE WHEN o.created_at IS NOT NULL AND ph.created_at > o.created_at THEN 1 ELSE 0 END as after_override
+			FROM points_history ph
+			LEFT JOIN subnet_user_points_override o ON CONVERT(o.subnet_id USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci 
+				AND CONVERT(o.wallet_address USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(ph.wallet_address USING utf8mb4) COLLATE utf8mb4_unicode_ci
+			WHERE CONVERT(ph.subnet_id USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+				AND ph.source = 'Chat Task'
+			GROUP BY ph.wallet_address, o.override_points, after_override
+			
+			UNION ALL
+			
+			-- Other tasks: subnet_id in tasks table
+			SELECT 
+				ph.wallet_address as user_wallet,
+				SUM(ph.points) as total_points,
+				COUNT(DISTINCT 
 					CASE 
 						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
 						ELSE ph.tx_ref
-					END = t.id
-				)
-				LEFT JOIN subnet_user_points_override o ON o.subnet_id = ? AND o.wallet_address = ph.wallet_address
-				WHERE t.subnet_id = ?
-					AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
-				GROUP BY ph.wallet_address, o.override_points, after_override
+					END
+				) as completed_tasks,
+				o.override_points,
+				CASE WHEN o.created_at IS NOT NULL AND ph.created_at > o.created_at THEN 1 ELSE 0 END as after_override
+			FROM points_history ph
+			INNER JOIN tasks t ON (
+				CASE 
+					WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+					ELSE ph.tx_ref
+				END = CONVERT(t.id USING utf8mb4) COLLATE utf8mb4_unicode_ci
+			)
+			LEFT JOIN subnet_user_points_override o ON CONVERT(o.subnet_id USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci 
+				AND CONVERT(o.wallet_address USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(ph.wallet_address USING utf8mb4) COLLATE utf8mb4_unicode_ci
+			WHERE CONVERT(t.subnet_id USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+			GROUP BY ph.wallet_address, o.override_points, after_override
 			) AS subnet_points
 			GROUP BY user_wallet, override_points
 		) ranked_users
@@ -952,46 +954,48 @@ func (ss *StatsService) GetSubnetLeaders(ctx context.Context, limit, offset int)
 						END DESC
 				) as rank_in_subnet
 			FROM (
-				-- Chat Task: direct subnet_id in points_history
-				SELECT 
-					ph.subnet_id,
-					ph.wallet_address as user_wallet,
-					SUM(ph.points) as total_points,
-					COUNT(DISTINCT ph.tx_ref) as completed_tasks,
-					o.override_points,
-					CASE WHEN o.created_at IS NOT NULL AND ph.created_at > o.created_at THEN 1 ELSE 0 END as after_override
-				FROM points_history ph
-				LEFT JOIN subnet_user_points_override o ON o.subnet_id = ph.subnet_id AND o.wallet_address = ph.wallet_address
-				WHERE ph.subnet_id IS NOT NULL
-					AND ph.source = 'Chat Task'
-				GROUP BY ph.subnet_id, ph.wallet_address, o.override_points, after_override
-				
-				UNION ALL
-				
-				-- Other tasks: subnet_id in tasks table
-				SELECT 
-					t.subnet_id,
-					ph.wallet_address as user_wallet,
-					SUM(ph.points) as total_points,
-					COUNT(DISTINCT 
-						CASE 
-							WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
-							ELSE ph.tx_ref
-						END
-					) as completed_tasks,
-					o.override_points,
-					CASE WHEN o.created_at IS NOT NULL AND ph.created_at > o.created_at THEN 1 ELSE 0 END as after_override
-				FROM points_history ph
-				INNER JOIN tasks t ON (
+			-- Chat Task: direct subnet_id in points_history
+			SELECT 
+				ph.subnet_id,
+				ph.wallet_address as user_wallet,
+				SUM(ph.points) as total_points,
+				COUNT(DISTINCT ph.tx_ref) as completed_tasks,
+				o.override_points,
+				CASE WHEN o.created_at IS NOT NULL AND ph.created_at > o.created_at THEN 1 ELSE 0 END as after_override
+			FROM points_history ph
+			LEFT JOIN subnet_user_points_override o ON CONVERT(o.subnet_id USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(ph.subnet_id USING utf8mb4) COLLATE utf8mb4_unicode_ci 
+				AND CONVERT(o.wallet_address USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(ph.wallet_address USING utf8mb4) COLLATE utf8mb4_unicode_ci
+			WHERE ph.subnet_id IS NOT NULL
+				AND ph.source = 'Chat Task'
+			GROUP BY ph.subnet_id, ph.wallet_address, o.override_points, after_override
+			
+			UNION ALL
+			
+			-- Other tasks: subnet_id in tasks table
+			SELECT 
+				t.subnet_id,
+				ph.wallet_address as user_wallet,
+				SUM(ph.points) as total_points,
+				COUNT(DISTINCT 
 					CASE 
 						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
 						ELSE ph.tx_ref
-					END = t.id
-				)
-				LEFT JOIN subnet_user_points_override o ON o.subnet_id = t.subnet_id AND o.wallet_address = ph.wallet_address
-				WHERE t.subnet_id IS NOT NULL
-					AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
-				GROUP BY t.subnet_id, ph.wallet_address, o.override_points, after_override
+					END
+				) as completed_tasks,
+				o.override_points,
+				CASE WHEN o.created_at IS NOT NULL AND ph.created_at > o.created_at THEN 1 ELSE 0 END as after_override
+			FROM points_history ph
+			INNER JOIN tasks t ON (
+				CASE 
+					WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+					ELSE ph.tx_ref
+				END = CONVERT(t.id USING utf8mb4) COLLATE utf8mb4_unicode_ci
+			)
+			LEFT JOIN subnet_user_points_override o ON CONVERT(o.subnet_id USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(t.subnet_id USING utf8mb4) COLLATE utf8mb4_unicode_ci 
+				AND CONVERT(o.wallet_address USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(ph.wallet_address USING utf8mb4) COLLATE utf8mb4_unicode_ci
+			WHERE t.subnet_id IS NOT NULL
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+			GROUP BY t.subnet_id, ph.wallet_address, o.override_points, after_override
 			) AS subnet_points
 			GROUP BY subnet_id, user_wallet, override_points
 		) ranked_users
