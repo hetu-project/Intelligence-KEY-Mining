@@ -21,18 +21,12 @@ CREATE TABLE IF NOT EXISTS subnet_points_adjustment (
     INDEX idx_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Subnet user points adjustment table';
 
--- 添加用户备注字段到 user_profiles 表
-ALTER TABLE user_profiles 
-ADD COLUMN IF NOT EXISTS admin_note TEXT COMMENT 'Admin note for this user',
-ADD COLUMN IF NOT EXISTS note_updated_at TIMESTAMP NULL DEFAULT NULL COMMENT 'Last time admin note was updated',
-ADD COLUMN IF NOT EXISTS note_updated_by VARCHAR(42) COMMENT 'Admin who last updated the note';
-
 -- ============================================
 -- Usage Notes:
 -- 
 -- 1. 增量积分逻辑:
 --    - 每次调整创建一条新记录
---    - 计算总积分 = 历史积分 + SUM(所有adjustment_points)
+--    - 计算总积分 = 任务积分 + SUM(所有adjustment_points)
 --    - 支持正数（增加）和负数（减少）
 --
 -- 2. 示例:
@@ -42,14 +36,19 @@ ADD COLUMN IF NOT EXISTS note_updated_by VARCHAR(42) COMMENT 'Admin who last upd
 --    管理员再调整 +5 分 (第二次)
 --    总积分 = 5 + 10 + 5 = 20
 --
--- 3. 查询历史:
+-- 3. 查询用户某个子网的总积分:
+--    SELECT 
+--        COALESCE(SUM(ph.points), 0) as task_points,
+--        COALESCE(SUM(spa.adjustment_points), 0) as adjustment_points,
+--        COALESCE(SUM(ph.points), 0) + COALESCE(SUM(spa.adjustment_points), 0) as total_points
+--    FROM user_profiles up
+--    LEFT JOIN points_history ph ON up.wallet_address = ph.wallet_address AND ph.subnet_id = ?
+--    LEFT JOIN subnet_points_adjustment spa ON up.wallet_address = spa.wallet_address AND spa.subnet_id = ?
+--    WHERE up.wallet_address = ?
+--
+-- 4. 查询调整历史:
 --    SELECT * FROM subnet_points_adjustment 
 --    WHERE subnet_id = ? AND wallet_address = ?
 --    ORDER BY created_at DESC
---
--- 4. 用户备注:
---    UPDATE user_profiles 
---    SET admin_note = ?, note_updated_at = NOW(), note_updated_by = ?
---    WHERE wallet_address = ?
 -- ============================================
 
