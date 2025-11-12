@@ -828,7 +828,7 @@ func (ss *StatsService) GetSubnetUserRanking(ctx context.Context, subnetID strin
 						SUM(ph.points) as total_points,
 						COUNT(DISTINCT ph.tx_ref) as completed_tasks
 					FROM points_history ph
-					WHERE CONVERT(ph.subnet_id USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+					WHERE ph.subnet_id = ?
 						AND ph.source = 'Chat Task'
 					GROUP BY ph.wallet_address
 					
@@ -849,9 +849,9 @@ func (ss *StatsService) GetSubnetUserRanking(ctx context.Context, subnetID strin
 						CASE 
 							WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
 							ELSE ph.tx_ref
-						END = CONVERT(t.id USING utf8mb4) COLLATE utf8mb4_unicode_ci
+						END = t.id
 					)
-					WHERE CONVERT(t.subnet_id USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+					WHERE t.subnet_id = ?
 						AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
 					GROUP BY ph.wallet_address
 				) AS all_tasks
@@ -863,7 +863,7 @@ func (ss *StatsService) GetSubnetUserRanking(ctx context.Context, subnetID strin
 					wallet_address,
 					SUM(adjustment_points) as adjustment_points
 				FROM subnet_points_adjustment
-				WHERE CONVERT(subnet_id USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+				WHERE subnet_id = ?
 				GROUP BY wallet_address
 			) AS adjustments ON task_summary.user_wallet = adjustments.wallet_address
 		) ranked_users
@@ -1002,7 +1002,7 @@ func (ss *StatsService) GetSubnetLeaders(ctx context.Context, limit, offset int)
 						CASE 
 							WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
 							ELSE ph.tx_ref
-						END = CONVERT(t.id USING utf8mb4) COLLATE utf8mb4_unicode_ci
+						END = t.id
 					)
 					WHERE t.subnet_id IS NOT NULL
 						AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
@@ -1576,7 +1576,7 @@ func (ss *StatsService) GetUserSubnetTotalPoints(ctx context.Context, subnetID, 
 			SELECT SUM(ph.points) as points
 			FROM points_history ph
 			WHERE ph.wallet_address = ?
-				AND CONVERT(ph.subnet_id USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+				AND ph.subnet_id = ?
 				AND ph.source = 'Chat Task'
 			
 			UNION ALL
@@ -1589,10 +1589,10 @@ func (ss *StatsService) GetUserSubnetTotalPoints(ctx context.Context, subnetID, 
 					WHEN ph.tx_ref LIKE 'pocw-consensus-%' 
 					THEN SUBSTRING(ph.tx_ref, 16)
 					ELSE ph.tx_ref
-				END = CONVERT(t.id USING utf8mb4) COLLATE utf8mb4_unicode_ci
+				END = t.id
 			)
 			WHERE ph.wallet_address = ?
-				AND CONVERT(t.subnet_id USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+				AND t.subnet_id = ?
 				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
 		) AS all_points
 	`, walletAddress, subnetID, walletAddress, subnetID).Scan(&taskPoints)
@@ -1605,8 +1605,8 @@ func (ss *StatsService) GetUserSubnetTotalPoints(ctx context.Context, subnetID, 
 	err = ss.db.QueryRowContext(ctx, `
 		SELECT COALESCE(SUM(adjustment_points), 0)
 		FROM subnet_points_adjustment
-		WHERE CONVERT(subnet_id USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
-			AND CONVERT(wallet_address USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+		WHERE subnet_id = ?
+			AND wallet_address = ?
 	`, subnetID, walletAddress).Scan(&adjustmentPoints)
 	if err != nil {
 		return 0, fmt.Errorf("failed to calculate adjustment points: %v", err)
@@ -1658,8 +1658,8 @@ func (ss *StatsService) GetAdjustmentHistory(ctx context.Context, subnetID, wall
 	query := `
 		SELECT id, subnet_id, wallet_address, adjustment_points, admin_wallet, reason, created_at
 		FROM subnet_points_adjustment
-		WHERE CONVERT(subnet_id USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
-			AND CONVERT(wallet_address USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+		WHERE subnet_id = ?
+			AND wallet_address = ?
 		ORDER BY created_at DESC
 		LIMIT ?
 	`
@@ -1711,8 +1711,8 @@ func (ss *StatsService) SearchUserByWallet(ctx context.Context, subnetID, wallet
 	ss.db.QueryRowContext(ctx, `
 		SELECT COALESCE(SUM(adjustment_points), 0)
 		FROM subnet_points_adjustment
-		WHERE CONVERT(subnet_id USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
-			AND CONVERT(wallet_address USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+		WHERE subnet_id = ?
+			AND wallet_address = ?
 	`, subnetID, walletAddress).Scan(&adjustmentTotal)
 
 	// 4. 查询任务积分
@@ -1725,7 +1725,7 @@ func (ss *StatsService) SearchUserByWallet(ctx context.Context, subnetID, wallet
 			SELECT DISTINCT ph.tx_ref
 			FROM points_history ph
 			WHERE ph.wallet_address = ?
-				AND CONVERT(ph.subnet_id USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+				AND ph.subnet_id = ?
 				AND ph.source = 'Chat Task'
 			
 			UNION
@@ -1737,10 +1737,10 @@ func (ss *StatsService) SearchUserByWallet(ctx context.Context, subnetID, wallet
 					WHEN ph.tx_ref LIKE 'pocw-consensus-%' 
 					THEN SUBSTRING(ph.tx_ref, 16)
 					ELSE ph.tx_ref
-				END = CONVERT(t.id USING utf8mb4) COLLATE utf8mb4_unicode_ci
+				END = t.id
 			)
 			WHERE ph.wallet_address = ?
-				AND CONVERT(t.subnet_id USING utf8mb4) COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+				AND t.subnet_id = ?
 				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
 		) AS tasks
 	`, walletAddress, subnetID, walletAddress, subnetID).Scan(&completedTasks)
