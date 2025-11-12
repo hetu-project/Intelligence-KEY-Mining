@@ -635,7 +635,7 @@ func (ss *StatsService) GetUserSubnets(ctx context.Context, userWallet string) (
 					WHEN ph.tx_ref LIKE 'pocw-consensus-%' 
 					THEN SUBSTRING(ph.tx_ref, 16)
 					ELSE ph.tx_ref
-				END = t.id
+				END = BINARY t.id
 			)
 			WHERE ph.wallet_address = ?
 				AND t.subnet_id IS NOT NULL
@@ -708,7 +708,7 @@ func (ss *StatsService) GetUserSubnets(ctx context.Context, userWallet string) (
 						WHEN ph.tx_ref LIKE 'pocw-consensus-%' 
 						THEN SUBSTRING(ph.tx_ref, 16)
 						ELSE ph.tx_ref
-					END = t.id
+					END = BINARY t.id
 				)
 				WHERE ph.wallet_address = ?
 					AND t.subnet_id = ?
@@ -787,7 +787,7 @@ func (ss *StatsService) GetSubnetUserRanking(ctx context.Context, subnetID strin
 				CASE 
 					WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
 					ELSE ph.tx_ref
-				END = t.id
+				END = BINARY t.id
 			)
 			WHERE t.subnet_id = ?
 				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
@@ -849,7 +849,7 @@ func (ss *StatsService) GetSubnetUserRanking(ctx context.Context, subnetID strin
 						CASE 
 							WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
 							ELSE ph.tx_ref
-						END = t.id
+						END = BINARY t.id
 					)
 					WHERE t.subnet_id = ?
 						AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
@@ -1002,7 +1002,7 @@ func (ss *StatsService) GetSubnetLeaders(ctx context.Context, limit, offset int)
 						CASE 
 							WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
 							ELSE ph.tx_ref
-						END = t.id
+						END = BINARY t.id
 					)
 					WHERE t.subnet_id IS NOT NULL
 						AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
@@ -1589,7 +1589,7 @@ func (ss *StatsService) GetUserSubnetTotalPoints(ctx context.Context, subnetID, 
 					WHEN ph.tx_ref LIKE 'pocw-consensus-%' 
 					THEN SUBSTRING(ph.tx_ref, 16)
 					ELSE ph.tx_ref
-				END = t.id
+				END = BINARY t.id
 			)
 			WHERE ph.wallet_address = ?
 				AND t.subnet_id = ?
@@ -1737,7 +1737,7 @@ func (ss *StatsService) SearchUserByWallet(ctx context.Context, subnetID, wallet
 					WHEN ph.tx_ref LIKE 'pocw-consensus-%' 
 					THEN SUBSTRING(ph.tx_ref, 16)
 					ELSE ph.tx_ref
-				END = t.id
+				END = BINARY t.id
 			)
 			WHERE ph.wallet_address = ?
 				AND t.subnet_id = ?
