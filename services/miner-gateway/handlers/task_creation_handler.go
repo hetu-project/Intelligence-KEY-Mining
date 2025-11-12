@@ -200,7 +200,7 @@ func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 		}
 
 	case models.TwitterFollowTask:
-		// Set default values for Twitter Follow task
+		// Set default title if empty
 		title := strings.TrimSpace(req.Title)
 		if title == "" {
 			title = fmt.Sprintf("Follow %s", req.ProjectName)

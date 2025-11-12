@@ -37,6 +37,7 @@ func main() {
 	pointsHandler := handlers.NewPointsHandler(pointsService)
 	statsHandler := handlers.NewStatsHandler(pointsService, statsService)
 	nftHandler := handlers.NewNFTHandler(pointsService, nftService)
+	adminHandler := handlers.NewAdminHandler(statsService) // New admin handler for points adjustment
 
 	// Initialize Gin router
 	router := gin.Default()
@@ -59,6 +60,7 @@ func main() {
 	pointsHandler.RegisterRoutes(api)
 	statsHandler.RegisterRoutes(api)
 	nftHandler.RegisterRoutes(api)
+	adminHandler.RegisterRoutes(api) // Register admin routes
 
 	// Start server
 	port := os.Getenv("PORT")
