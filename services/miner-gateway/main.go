@@ -51,6 +51,7 @@ func main() {
 	verifierRegistry.RegisterVerifier("twitter_post", verifiers.NewGenericVerifier(models.TwitterPostTask))
 	verifierRegistry.RegisterVerifier("twitter_follow", verifiers.NewGenericVerifier(models.TwitterFollowTask))
 	verifierRegistry.RegisterVerifier("telegram_task", verifiers.NewGenericVerifier(models.TelegramTask))
+	verifierRegistry.RegisterVerifier("register_qr_code", verifiers.NewGenericVerifier(models.RegisterQRCodeTask))
 
 	// 4. Initialize services
 	vlcService := services.NewVLCService()
@@ -229,6 +230,7 @@ func setupRoutes(
 			taskCreation.GET("/user/:wallet", taskCreationHandler.ListUserTaskCreations)
 			taskCreation.GET("/stats", taskCreationHandler.GetTaskCreationStats)
 			taskCreation.PUT("/update-twitter-link", taskCreationHandler.UpdateTwitterLink)
+			taskCreation.PUT("/update-register-qr-code", taskCreationHandler.UpdateRegisterQRCodeTask)
 		}
 
 		// Whitelist management (admin endpoints)

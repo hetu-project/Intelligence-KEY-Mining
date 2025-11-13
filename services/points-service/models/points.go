@@ -16,6 +16,7 @@ const (
 	PointsSourceCreatorCommission = "Creator Commission"
 	PointsSourceTelegramTask      = "Telegram Task"
 	PointsSourceChatTask          = "Chat Task"
+	PointsSourceRegisterQRCode    = "Register QR Code Task"
 )
 
 // PointsDistributionRequest points distribution request
@@ -223,6 +224,24 @@ type ChatTaskRewardResponse struct {
 	PointsAdded  int    `json:"points_added"`
 	NewTotal     int    `json:"new_total"`
 	HasNFT       bool   `json:"has_nft"`
+	Message      string `json:"message,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
+}
+
+// RegisterQRCodeRewardRequest represents a Register QR code task reward request
+type RegisterQRCodeRewardRequest struct {
+	UserWallet string `json:"user_wallet" validate:"required"`
+	TaskID     string `json:"task_id" validate:"required"`
+}
+
+// RegisterQRCodeRewardResponse represents a Register QR code task reward response
+type RegisterQRCodeRewardResponse struct {
+	Success      bool   `json:"success"`
+	UserWallet   string `json:"user_wallet"`
+	TaskID       string `json:"task_id"`
+	PointsAdded  int    `json:"points_added"` // Always 0 for Register QR code tasks
+	RewardBadge  string `json:"reward_badge"` // Snapshot of reward badge at completion time
+	AlreadyDone  bool   `json:"already_done"` // Whether user already completed this task
 	Message      string `json:"message,omitempty"`
 	ErrorMessage string `json:"error_message,omitempty"`
 }

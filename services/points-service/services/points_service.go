@@ -90,6 +90,8 @@ func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, 
 			source = models.PointsSourceTaskCreation
 		case "chat":
 			source = models.PointsSourceChatTask
+		case "register_qr_code":
+			source = models.PointsSourceRegisterQRCode
 		default:
 			return nil, 0, fmt.Errorf("unsupported task type: %s", taskType)
 		}
@@ -174,6 +176,8 @@ func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, 
 			task.TaskType = "twitter_follow"
 		case models.PointsSourceChatTask:
 			task.TaskType = "chat"
+		case models.PointsSourceRegisterQRCode:
+			task.TaskType = "register_qr_code"
 		default:
 			task.TaskType = "unknown"
 		}
@@ -418,6 +422,50 @@ func (ps *PointsService) GetTaskSubnetID(ctx context.Context, taskID string) (st
 		return "", nil
 	}
 	return subnetID.String, nil
+}
+
+// CheckUserCompletedTask checks if user has already completed a specific task
+func (ps *PointsService) CheckUserCompletedTask(ctx context.Context, userWallet, taskID string) (bool, error) {
+	query := `
+		SELECT COUNT(*) 
+		FROM points_history 
+		WHERE wallet_address = ? 
+		  AND tx_ref = ?
+		  AND source = ?
+	`
+	var count int
+	err := ps.db.QueryRowContext(ctx, query, userWallet, taskID, models.PointsSourceRegisterQRCode).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("failed to check task completion: %v", err)
+	}
+	return count > 0, nil
+}
+
+// GetTaskRewardBadge gets the reward_badge from task payload (for Register QR code tasks)
+func (ps *PointsService) GetTaskRewardBadge(ctx context.Context, taskID string) (string, error) {
+	query := `
+		SELECT JSON_EXTRACT(payload, '$.reward_badge') 
+		FROM tasks 
+		WHERE id = ? 
+		  AND task_type = 'register_qr_code'
+	`
+	var rewardBadge sql.NullString
+	err := ps.db.QueryRowContext(ctx, query, taskID).Scan(&rewardBadge)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", fmt.Errorf("register_qr_code task not found: %s", taskID)
+		}
+		return "", fmt.Errorf("failed to get reward badge: %v", err)
+	}
+	if !rewardBadge.Valid || rewardBadge.String == "" {
+		return "", fmt.Errorf("reward_badge not found in task payload")
+	}
+	// MySQL JSON_EXTRACT returns quoted strings, so we need to remove quotes
+	badge := rewardBadge.String
+	if len(badge) >= 2 && badge[0] == '"' && badge[len(badge)-1] == '"' {
+		badge = badge[1 : len(badge)-1]
+	}
+	return badge, nil
 }
 
 // GetUserSubnetTotalPoints calculates user's total points in a subnet (considering override snapshot + incremental)
@@ -858,6 +906,8 @@ func mapSourceToSimpleName(source string) string {
 		return "twitter_post"
 	case models.PointsSourceTwitterFollow:
 		return "twitter_follow"
+	case models.PointsSourceRegisterQRCode:
+		return "register_qr_code"
 	case models.PointsSourceVLCDistribution:
 		return "twitter_retweet"
 	case models.PointsSourceTelegramTask:

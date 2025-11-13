@@ -16,8 +16,9 @@ const (
 	DiscordMessageTask TaskType = "discord_message"
 	EmailConfirmTask   TaskType = "email_confirm"
 	// New task types
-	TaskCreationTask TaskType = "task_creation"
-	TelegramTask     TaskType = "telegram_task"
+	TaskCreationTask   TaskType = "task_creation"
+	TelegramTask       TaskType = "telegram_task"
+	RegisterQRCodeTask TaskType = "register_qr_code"
 	// Note: BatchVerificationTask removed - it's an operation, not a task type
 	// Future extended task types
 )
@@ -103,6 +104,17 @@ type TwitterPostTaskPayload struct {
 	PostLink    string `json:"post_link"`    // Required post link
 }
 
+// RegisterQRCodeTaskPayload represents Register with QR code task payload
+type RegisterQRCodeTaskPayload struct {
+	Title       string `json:"title"`        // Title (max 15 words)
+	Description string `json:"description"`  // Description (max 20 words)
+	Detail      string `json:"detail"`       // Detail (max 200 words)
+	RewardBadge string `json:"reward_badge"` // Reward badge image URL
+	ProjectName string `json:"project_name"` // Project name
+	ProjectIcon string `json:"project_icon"` // Project icon URL
+	SubnetID    string `json:"subnet_id"`    // Subnet ID
+}
+
 // BatchVerificationPayload represents batch verification payload
 type BatchVerificationPayload struct {
 	StartTime string `json:"start_time"` // Verification start time
@@ -159,6 +171,10 @@ type TaskCreationRequest struct {
 	FollowAccountID     string `json:"follow_account_id"`     // Optional but recommended
 	FollowAccountHandle string `json:"follow_account_handle"` // Optional
 	FollowAccountURL    string `json:"follow_account_url"`    // Optional
+
+	// Register QR code task fields (required when task_type = "register_qr_code")
+	Detail      string `json:"detail"`       // Detail (max 200 words)
+	RewardBadge string `json:"reward_badge"` // Reward badge image URL
 }
 
 // TaskCreationResponse represents task creation response

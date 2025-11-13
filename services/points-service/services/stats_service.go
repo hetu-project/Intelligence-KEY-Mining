@@ -186,7 +186,7 @@ func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, err
 					END = t2.id
 				)
 				WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task', 'Register QR Code Task')
 			), 0) as completed_tasks,
 			-- Unique users: count all users who got points for this subnet
 			COALESCE((
@@ -199,7 +199,7 @@ func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, err
 					END = t2.id
 				)
 				WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task', 'Register QR Code Task')
 			), 0) as unique_users,
 			-- Total points distributed: sum all points for this subnet
 			COALESCE((
@@ -212,7 +212,7 @@ func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, err
 					END = t2.id
 				)
 				WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task', 'Register QR Code Task')
 			), 0) as total_points_distributed,
 			-- Today points distributed: sum today's points for this subnet
 			COALESCE((
@@ -226,7 +226,7 @@ func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, err
 				)
 				WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
 				AND DATE(ph.created_at) = CURDATE()
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task', 'Register QR Code Task')
 			), 0) as today_points_distributed,
 			-- Today active users: count users who got points today for this subnet
 			COALESCE((
@@ -240,7 +240,7 @@ func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, err
 				)
 				WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
 				AND DATE(ph.created_at) = CURDATE()
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task', 'Register QR Code Task')
 			), 0) as today_active_users
 		FROM subnets s
 		LEFT JOIN tasks t ON s.id = t.subnet_id COLLATE utf8mb4_unicode_ci
@@ -317,7 +317,7 @@ func (ss *StatsService) GetSubnetDetails(ctx context.Context, subnetID string) (
 					END = t2.id
 				)
 				WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task', 'Register QR Code Task')
 			), 0) as completed_tasks,
 			-- Unique users: count all users who got points for this subnet
 			COALESCE((
@@ -330,7 +330,7 @@ func (ss *StatsService) GetSubnetDetails(ctx context.Context, subnetID string) (
 					END = t2.id
 				)
 				WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task', 'Register QR Code Task')
 			), 0) as unique_users,
 			-- Total points distributed: sum all points for this subnet
 			COALESCE((
@@ -343,7 +343,7 @@ func (ss *StatsService) GetSubnetDetails(ctx context.Context, subnetID string) (
 					END = t2.id
 				)
 				WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task', 'Register QR Code Task')
 			), 0) as total_points_distributed,
 			-- Today points distributed: sum today's points for this subnet
 			COALESCE((
@@ -357,7 +357,7 @@ func (ss *StatsService) GetSubnetDetails(ctx context.Context, subnetID string) (
 				)
 				WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
 				AND DATE(ph.created_at) = CURDATE()
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task', 'Register QR Code Task')
 			), 0) as today_points_distributed,
 			-- Today active users: count users who got points today for this subnet
 			COALESCE((
@@ -371,7 +371,7 @@ func (ss *StatsService) GetSubnetDetails(ctx context.Context, subnetID string) (
 				)
 				WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
 				AND DATE(ph.created_at) = CURDATE()
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task', 'Register QR Code Task')
 			), 0) as today_active_users
 		FROM subnets s
 		LEFT JOIN tasks t ON s.id = t.subnet_id COLLATE utf8mb4_unicode_ci
@@ -639,7 +639,7 @@ func (ss *StatsService) GetUserSubnets(ctx context.Context, userWallet string) (
 			)
 			WHERE ph.wallet_address = ?
 				AND t.subnet_id IS NOT NULL
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task', 'Register QR Code Task')
 		) AS user_subnets
 	`
 
@@ -712,7 +712,7 @@ func (ss *StatsService) GetUserSubnets(ctx context.Context, userWallet string) (
 				)
 				WHERE ph.wallet_address = ?
 					AND t.subnet_id = ?
-					AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+					AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task', 'Register QR Code Task')
 			) AS user_tasks
 		`, userWallet, subnetID, userWallet, subnetID).Scan(&completedTasks)
 
@@ -751,7 +751,7 @@ func (ss *StatsService) GetUserSubnetSummary(ctx context.Context, userWallet str
 		FROM points_history
 		WHERE wallet_address = ?
 			AND DATE(created_at) = CURDATE()
-			AND source IN ('Chat Task', 'VLC Distribution', 'Twitter Post Task', 'Telegram Task')
+			AND source IN ('Chat Task', 'VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Register QR Code Task')
 	`, userWallet).Scan(&todayPointsEarned)
 
 	if err != nil {
@@ -790,7 +790,7 @@ func (ss *StatsService) GetSubnetUserRanking(ctx context.Context, subnetID strin
 				END = t.id COLLATE utf8mb4_unicode_ci
 			)
 			WHERE t.subnet_id = ?
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task', 'Register QR Code Task')
 		) AS all_users
 	`
 	var totalCount int
@@ -852,7 +852,7 @@ func (ss *StatsService) GetSubnetUserRanking(ctx context.Context, subnetID strin
 						END = t.id COLLATE utf8mb4_unicode_ci
 					)
 					WHERE t.subnet_id = ?
-						AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+						AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task', 'Register QR Code Task')
 					GROUP BY ph.wallet_address
 				) AS all_tasks
 				GROUP BY wallet_address
@@ -1005,7 +1005,7 @@ func (ss *StatsService) GetSubnetLeaders(ctx context.Context, limit, offset int)
 						END = t.id COLLATE utf8mb4_unicode_ci
 					)
 					WHERE t.subnet_id IS NOT NULL
-						AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+						AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task', 'Register QR Code Task')
 					GROUP BY t.subnet_id, ph.wallet_address
 				) AS all_tasks
 				GROUP BY subnet_id, wallet_address
@@ -1228,7 +1228,7 @@ func (ss *StatsService) GetSubnetsDailyPoints(ctx context.Context, days int, sub
 		INNER JOIN tasks t ON t.subnet_id = s.id COLLATE utf8mb4_unicode_ci
 		INNER JOIN points_history ph ON (
 			ph.subnet_id IS NULL
-			AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+			AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task', 'Register QR Code Task')
 			AND ph.created_at IS NOT NULL
 			AND DATE(ph.created_at) BETWEEN DATE_SUB(CURDATE(), INTERVAL ? DAY) AND CURDATE()
 			AND t.id = CASE 
@@ -1593,7 +1593,7 @@ func (ss *StatsService) GetUserSubnetTotalPoints(ctx context.Context, subnetID, 
 			)
 			WHERE ph.wallet_address = ?
 				AND t.subnet_id = ?
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task', 'Register QR Code Task')
 		) AS all_points
 	`, walletAddress, subnetID, walletAddress, subnetID).Scan(&taskPoints)
 	if err != nil {
@@ -1741,7 +1741,7 @@ func (ss *StatsService) SearchUserByWallet(ctx context.Context, subnetID, wallet
 			)
 			WHERE ph.wallet_address = ?
 				AND t.subnet_id = ?
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task', 'Register QR Code Task')
 		) AS tasks
 	`, walletAddress, subnetID, walletAddress, subnetID).Scan(&completedTasks)
 

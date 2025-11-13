@@ -356,7 +356,8 @@ func (nh *NFTHandler) RegisterRoutes(router *gin.RouterGroup) {
 		points.POST("/telegram-task-reward", nh.HandleTelegramTaskReward)
 		points.POST("/twitter-post-reward", nh.HandleTwitterPostReward)
 		points.POST("/twitter-follow-reward", nh.HandleTwitterFollowReward)
-		points.POST("/chat-task-reward", nh.HandleChatTaskReward) // NEW: Chat task reward
+		points.POST("/chat-task-reward", nh.HandleChatTaskReward)              // NEW: Chat task reward
+		points.POST("/register-qr-code-reward", nh.HandleRegisterQRCodeReward) // NEW: Register QR code task
 
 		// User completed tasks query
 		points.GET("/completed-tasks/:wallet", nh.GetUserCompletedTasks)
@@ -782,5 +783,90 @@ func (nh *NFTHandler) HandleTwitterFollowReward(c *gin.Context) {
 		NewTotal:    newTotal,
 		HasNFT:      hasNFT,
 		Message:     "Twitter follow reward added successfully",
+	})
+}
+
+// HandleRegisterQRCodeReward handles Register QR code task reward
+// This task gives 0 points but records completion and saves badge snapshot
+func (nh *NFTHandler) HandleRegisterQRCodeReward(c *gin.Context) {
+	var req models.RegisterQRCodeRewardRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid request format: " + err.Error(),
+		})
+		return
+	}
+
+	// Validate required fields
+	if req.UserWallet == "" || req.TaskID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "user_wallet and task_id are required",
+		})
+		return
+	}
+
+	// Check if user already completed this task (one time only)
+	alreadyCompleted, err := nh.pointsService.CheckUserCompletedTask(c.Request.Context(), req.UserWallet, req.TaskID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to check task completion status: " + err.Error(),
+		})
+		return
+	}
+
+	if alreadyCompleted {
+		c.JSON(http.StatusOK, &models.RegisterQRCodeRewardResponse{
+			Success:     true,
+			UserWallet:  req.UserWallet,
+			TaskID:      req.TaskID,
+			PointsAdded: 0,
+			RewardBadge: "",
+			AlreadyDone: true,
+			Message:     "User has already completed this task",
+		})
+		return
+	}
+
+	// Get reward badge from task payload (snapshot)
+	rewardBadge, err := nh.pointsService.GetTaskRewardBadge(c.Request.Context(), req.TaskID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Failed to get reward badge from task: " + err.Error(),
+		})
+		return
+	}
+
+	// Add points record with 0 points but save badge snapshot
+	err = nh.pointsService.AddDirectPoints(c.Request.Context(), &models.DirectPointsRequest{
+		UserWallet:  req.UserWallet,
+		Points:      0, // Register QR code tasks give 0 points
+		Source:      models.PointsSourceRegisterQRCode,
+		Description: "Register QR Code Task Completion",
+		Reference:   req.TaskID,
+		Metadata: map[string]interface{}{
+			"task_id":      req.TaskID,
+			"reward_badge": rewardBadge, // Save badge snapshot
+		},
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to record Register QR code completion: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, &models.RegisterQRCodeRewardResponse{
+		Success:     true,
+		UserWallet:  req.UserWallet,
+		TaskID:      req.TaskID,
+		PointsAdded: 0,
+		RewardBadge: rewardBadge,
+		AlreadyDone: false,
+		Message:     "Register QR code task completed successfully",
 	})
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -778,5 +779,98 @@ func (ts *TaskService) UpdateTwitterLink(ctx context.Context, userWallet, oldTwe
 	}
 
 	log.Printf("Successfully updated Twitter link for task %s: %s -> %s", taskID, oldTweetID, newTweetID)
+	return nil
+}
+
+// UpdateRegisterQRCodeTask updates the Register QR code task content
+func (ts *TaskService) UpdateRegisterQRCodeTask(ctx context.Context, userWallet, taskID, title, description, detail, rewardBadge string) error {
+	// Start transaction
+	tx, err := ts.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	// 1. Find and lock the task
+	var taskType, status, owner string
+	query := `
+		SELECT task_type, status, user_wallet 
+		FROM tasks 
+		WHERE id = ? 
+		  AND user_wallet = ?
+		FOR UPDATE
+	`
+	err = tx.QueryRowContext(ctx, query, taskID, userWallet).Scan(&taskType, &status, &owner)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("task not found")
+		}
+		return fmt.Errorf("failed to query task: %v", err)
+	}
+
+	// 2. Verify task type
+	if taskType != "register_qr_code" {
+		return fmt.Errorf("not a register_qr_code task")
+	}
+
+	// 3. Verify permissions
+	if owner != userWallet {
+		return fmt.Errorf("permission denied")
+	}
+
+	// 4. Build update query dynamically based on provided fields
+	updateParts := []string{}
+	args := []interface{}{}
+
+	if title != "" {
+		updateParts = append(updateParts, "'$.title', ?")
+		args = append(args, title)
+	}
+	if description != "" {
+		updateParts = append(updateParts, "'$.description', ?")
+		args = append(args, description)
+	}
+	if detail != "" {
+		updateParts = append(updateParts, "'$.detail', ?")
+		args = append(args, detail)
+	}
+	if rewardBadge != "" {
+		updateParts = append(updateParts, "'$.reward_badge', ?")
+		args = append(args, rewardBadge)
+	}
+
+	if len(updateParts) == 0 {
+		return fmt.Errorf("no fields to update")
+	}
+
+	// 5. Update the task payload
+	updateQuery := fmt.Sprintf(`
+		UPDATE tasks 
+		SET payload = JSON_SET(payload, %s),
+		updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, strings.Join(updateParts, ", "))
+
+	args = append(args, taskID)
+	result, err := tx.ExecContext(ctx, updateQuery, args...)
+	if err != nil {
+		return fmt.Errorf("failed to update task: %v", err)
+	}
+
+	// Check if any rows were affected
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %v", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("no rows updated")
+	}
+
+	// 6. Commit transaction
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	log.Printf("Successfully updated Register QR code task %s for user %s", taskID, userWallet)
 	return nil
 }

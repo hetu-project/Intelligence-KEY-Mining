@@ -81,10 +81,12 @@ func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 		internalTaskType = models.TaskCreationTask // Maps to "task_creation"
 	case "telegram_task":
 		internalTaskType = models.TelegramTask // Maps to "telegram_task"
+	case "register_qr_code":
+		internalTaskType = models.RegisterQRCodeTask // Maps to "register_qr_code"
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"message": "Invalid task type. Must be 'twitter_retweet', 'twitter_post', 'twitter_follow', 'task_creation', or 'telegram_task'",
+			"message": "Invalid task type. Must be 'twitter_retweet', 'twitter_post', 'twitter_follow', 'task_creation', 'telegram_task', or 'register_qr_code'",
 		})
 		return
 	}
@@ -246,6 +248,54 @@ func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 			"follow_account_handle": followAccountHandle,
 			"follow_account_url":    followAccountURL,
 			"subnet_id":             subnetID,
+		}
+
+	case models.RegisterQRCodeTask:
+		// Validate required Register QR code fields
+		title := strings.TrimSpace(req.Title)
+		if title == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "Register QR code task requires title (max 15 words)",
+			})
+			return
+		}
+
+		description := strings.TrimSpace(req.Description)
+		if description == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "Register QR code task requires description (max 20 words)",
+			})
+			return
+		}
+
+		detail := strings.TrimSpace(req.Detail)
+		if detail == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "Register QR code task requires detail (max 200 words)",
+			})
+			return
+		}
+
+		rewardBadge := strings.TrimSpace(req.RewardBadge)
+		if rewardBadge == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "Register QR code task requires reward_badge (image URL)",
+			})
+			return
+		}
+
+		payload = map[string]interface{}{
+			"project_name": req.ProjectName,
+			"project_icon": req.ProjectIcon,
+			"title":        title,
+			"description":  description,
+			"detail":       detail,
+			"reward_badge": rewardBadge,
+			"subnet_id":    subnetID,
 		}
 
 	default:
@@ -497,6 +547,78 @@ func (tch *TaskCreationHandler) UpdateTwitterLink(c *gin.Context) {
 			"updated_at":       time.Now(),
 		},
 		"warning": "Users who have already retweeted the old link need to retweet the new link for verification",
+	})
+}
+
+// UpdateRegisterQRCodeTask updates the Register QR code task content
+func (tch *TaskCreationHandler) UpdateRegisterQRCodeTask(c *gin.Context) {
+	var req struct {
+		UserWallet  string `json:"user_wallet" binding:"required"`
+		TaskID      string `json:"task_id" binding:"required"`
+		Title       string `json:"title"`        // Optional: max 15 words
+		Description string `json:"description"`  // Optional: max 20 words
+		Detail      string `json:"detail"`       // Optional: max 200 words
+		RewardBadge string `json:"reward_badge"` // Optional: reward badge image URL
+	}
+
+	// Bind request parameters
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Invalid request format: " + err.Error(),
+		})
+		return
+	}
+
+	// At least one field must be provided
+	if req.Title == "" && req.Description == "" && req.Detail == "" && req.RewardBadge == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "At least one field (title, description, detail, reward_badge) must be provided",
+		})
+		return
+	}
+
+	// Call task service to update the task
+	err := tch.taskService.UpdateRegisterQRCodeTask(c.Request.Context(), req.UserWallet, req.TaskID, req.Title, req.Description, req.Detail, req.RewardBadge)
+	if err != nil {
+		// Handle different error types
+		switch {
+		case strings.Contains(err.Error(), "not found"):
+			c.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"message": "Task not found for the given user and task ID",
+			})
+		case strings.Contains(err.Error(), "permission denied"):
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "Permission denied: only task creator can modify the task",
+			})
+		case strings.Contains(err.Error(), "not a register_qr_code task"):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "Task is not a Register QR code task",
+			})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": "Failed to update Register QR code task: " + err.Error(),
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Register QR code task updated successfully",
+		"data": gin.H{
+			"task_id":      req.TaskID,
+			"title":        req.Title,
+			"description":  req.Description,
+			"detail":       req.Detail,
+			"reward_badge": req.RewardBadge,
+			"updated_at":   time.Now(),
+		},
 	})
 }
 
