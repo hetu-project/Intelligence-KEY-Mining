@@ -252,29 +252,29 @@ func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 
 	case models.RegisterQRCodeTask:
 		// Validate required Register QR code fields
-		title := strings.TrimSpace(req.Title)
-		if title == "" {
+		taskTitle := strings.TrimSpace(req.TaskTitle)
+		if taskTitle == "" {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"success": false,
-				"message": "Register QR code task requires title (max 15 words)",
+				"message": "Register QR code task requires task_title (max 15 words)",
 			})
 			return
 		}
 
-		description := strings.TrimSpace(req.Description)
-		if description == "" {
+		taskDescription := strings.TrimSpace(req.TaskDescription)
+		if taskDescription == "" {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"success": false,
-				"message": "Register QR code task requires description (max 20 words)",
+				"message": "Register QR code task requires task_description (max 20 words)",
 			})
 			return
 		}
 
-		detail := strings.TrimSpace(req.Detail)
-		if detail == "" {
+		taskDetail := strings.TrimSpace(req.TaskDetail)
+		if taskDetail == "" {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"success": false,
-				"message": "Register QR code task requires detail (max 200 words)",
+				"message": "Register QR code task requires task_detail (max 200 words)",
 			})
 			return
 		}
@@ -291,9 +291,9 @@ func (tch *TaskCreationHandler) CreateTwitterTask(c *gin.Context) {
 		payload = map[string]interface{}{
 			"project_name": req.ProjectName,
 			"project_icon": req.ProjectIcon,
-			"title":        title,
-			"description":  description,
-			"detail":       detail,
+			"title":        taskTitle,
+			"description":  taskDescription,
+			"detail":       taskDetail,
 			"reward_badge": rewardBadge,
 			"subnet_id":    subnetID,
 		}
@@ -553,12 +553,12 @@ func (tch *TaskCreationHandler) UpdateTwitterLink(c *gin.Context) {
 // UpdateRegisterQRCodeTask updates the Register QR code task content
 func (tch *TaskCreationHandler) UpdateRegisterQRCodeTask(c *gin.Context) {
 	var req struct {
-		UserWallet  string `json:"user_wallet" binding:"required"`
-		TaskID      string `json:"task_id" binding:"required"`
-		Title       string `json:"title"`        // Optional: max 15 words
-		Description string `json:"description"`  // Optional: max 20 words
-		Detail      string `json:"detail"`       // Optional: max 200 words
-		RewardBadge string `json:"reward_badge"` // Optional: reward badge image URL
+		UserWallet      string `json:"user_wallet" binding:"required"`
+		TaskID          string `json:"task_id" binding:"required"`
+		TaskTitle       string `json:"task_title"`       // Optional: max 15 words
+		TaskDescription string `json:"task_description"` // Optional: max 20 words
+		TaskDetail      string `json:"task_detail"`      // Optional: max 200 words
+		RewardBadge     string `json:"reward_badge"`     // Optional: reward badge image URL
 	}
 
 	// Bind request parameters
@@ -571,16 +571,16 @@ func (tch *TaskCreationHandler) UpdateRegisterQRCodeTask(c *gin.Context) {
 	}
 
 	// At least one field must be provided
-	if req.Title == "" && req.Description == "" && req.Detail == "" && req.RewardBadge == "" {
+	if req.TaskTitle == "" && req.TaskDescription == "" && req.TaskDetail == "" && req.RewardBadge == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"message": "At least one field (title, description, detail, reward_badge) must be provided",
+			"message": "At least one field (task_title, task_description, task_detail, reward_badge) must be provided",
 		})
 		return
 	}
 
 	// Call task service to update the task
-	err := tch.taskService.UpdateRegisterQRCodeTask(c.Request.Context(), req.UserWallet, req.TaskID, req.Title, req.Description, req.Detail, req.RewardBadge)
+	err := tch.taskService.UpdateRegisterQRCodeTask(c.Request.Context(), req.UserWallet, req.TaskID, req.TaskTitle, req.TaskDescription, req.TaskDetail, req.RewardBadge)
 	if err != nil {
 		// Handle different error types
 		switch {
@@ -612,12 +612,12 @@ func (tch *TaskCreationHandler) UpdateRegisterQRCodeTask(c *gin.Context) {
 		"success": true,
 		"message": "Register QR code task updated successfully",
 		"data": gin.H{
-			"task_id":      req.TaskID,
-			"title":        req.Title,
-			"description":  req.Description,
-			"detail":       req.Detail,
-			"reward_badge": req.RewardBadge,
-			"updated_at":   time.Now(),
+			"task_id":          req.TaskID,
+			"task_title":       req.TaskTitle,
+			"task_description": req.TaskDescription,
+			"task_detail":      req.TaskDetail,
+			"reward_badge":     req.RewardBadge,
+			"updated_at":       time.Now(),
 		},
 	})
 }

@@ -173,8 +173,10 @@ type TaskCreationRequest struct {
 	FollowAccountURL    string `json:"follow_account_url"`    // Optional
 
 	// Register QR code task fields (required when task_type = "register_qr_code")
-	Detail      string `json:"detail"`       // Detail (max 200 words)
-	RewardBadge string `json:"reward_badge"` // Reward badge image URL
+	TaskTitle       string `json:"task_title"`       // Task title (max 15 words)
+	TaskDescription string `json:"task_description"` // Task description (max 20 words)
+	TaskDetail      string `json:"task_detail"`      // Task detail (max 200 words)
+	RewardBadge     string `json:"reward_badge"`     // Reward badge image URL
 }
 
 // TaskCreationResponse represents task creation response
