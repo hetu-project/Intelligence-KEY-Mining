@@ -227,12 +227,8 @@ func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, err
 				)
 				WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
 				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Register QR Code Task')
-			), 0) + COALESCE((
-				SELECT SUM(spa.adjustment_points)
-				FROM subnet_points_adjustment spa
-				WHERE spa.subnet_id = s.id COLLATE utf8mb4_unicode_ci
 			), 0) as total_points_distributed,
-			-- Today points distributed: sum today's points for this subnet (including today's adjustments)
+			-- Today points distributed: sum today's points for this subnet (NOT including adjustments)
 			-- Split into two parts to avoid double counting
 			COALESCE((
 				SELECT SUM(ph.points) 
@@ -252,11 +248,6 @@ func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, err
 				WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
 				AND DATE(ph.created_at) = CURDATE()
 				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Register QR Code Task')
-			), 0) + COALESCE((
-				SELECT SUM(spa.adjustment_points)
-				FROM subnet_points_adjustment spa
-				WHERE spa.subnet_id = s.id COLLATE utf8mb4_unicode_ci
-				AND DATE(spa.created_at) = CURDATE()
 			), 0) as today_points_distributed,
 			-- Today active users: count users who got points today for this subnet
 			-- Use UNION to avoid double counting
@@ -397,12 +388,8 @@ func (ss *StatsService) GetSubnetDetails(ctx context.Context, subnetID string) (
 				)
 				WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
 				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Register QR Code Task')
-			), 0) + COALESCE((
-				SELECT SUM(spa.adjustment_points)
-				FROM subnet_points_adjustment spa
-				WHERE spa.subnet_id = s.id COLLATE utf8mb4_unicode_ci
 			), 0) as total_points_distributed,
-			-- Today points distributed: sum today's points for this subnet (including today's adjustments)
+			-- Today points distributed: sum today's points for this subnet (NOT including adjustments)
 			-- Split into two parts to avoid double counting
 			COALESCE((
 				SELECT SUM(ph.points) 
@@ -422,11 +409,6 @@ func (ss *StatsService) GetSubnetDetails(ctx context.Context, subnetID string) (
 				WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
 				AND DATE(ph.created_at) = CURDATE()
 				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Register QR Code Task')
-			), 0) + COALESCE((
-				SELECT SUM(spa.adjustment_points)
-				FROM subnet_points_adjustment spa
-				WHERE spa.subnet_id = s.id COLLATE utf8mb4_unicode_ci
-				AND DATE(spa.created_at) = CURDATE()
 			), 0) as today_points_distributed,
 			-- Today active users: count users who got points today for this subnet
 			-- Use UNION to avoid double counting
