@@ -304,7 +304,7 @@ func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, err
 			return nil, fmt.Errorf("failed to scan subnet stats: %v", err)
 		}
 
-		// Add adjustment points to total (不加到今日积分)
+		// Add adjustment points to total
 		var adjustmentTotal int
 		err = ss.db.QueryRowContext(ctx, `
 			SELECT COALESCE(SUM(adjustment_points), 0)
@@ -313,6 +313,18 @@ func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, err
 		`, stat.SubnetID).Scan(&adjustmentTotal)
 		if err == nil {
 			stat.TotalPointsDistributed += adjustmentTotal
+		}
+
+		// Add today's adjustment points to today's total
+		var todayAdjustmentTotal int
+		err = ss.db.QueryRowContext(ctx, `
+			SELECT COALESCE(SUM(adjustment_points), 0)
+			FROM subnet_points_adjustment
+			WHERE subnet_id = ?
+			AND DATE(created_at) = CURDATE()
+		`, stat.SubnetID).Scan(&todayAdjustmentTotal)
+		if err == nil {
+			stat.TodayPointsDistributed += todayAdjustmentTotal
 		}
 
 		stats = append(stats, &stat)
@@ -460,7 +472,7 @@ func (ss *StatsService) GetSubnetDetails(ctx context.Context, subnetID string) (
 		return nil, fmt.Errorf("failed to get subnet details: %v", err)
 	}
 
-	// Add adjustment points to total (不加到今日积分)
+	// Add adjustment points to total
 	var adjustmentTotal int
 	err = ss.db.QueryRowContext(ctx, `
 		SELECT COALESCE(SUM(adjustment_points), 0)
@@ -469,6 +481,18 @@ func (ss *StatsService) GetSubnetDetails(ctx context.Context, subnetID string) (
 	`, subnetID).Scan(&adjustmentTotal)
 	if err == nil {
 		stat.TotalPointsDistributed += adjustmentTotal
+	}
+
+	// Add today's adjustment points to today's total
+	var todayAdjustmentTotal int
+	err = ss.db.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(adjustment_points), 0)
+		FROM subnet_points_adjustment
+		WHERE subnet_id = ?
+		AND DATE(created_at) = CURDATE()
+	`, subnetID).Scan(&todayAdjustmentTotal)
+	if err == nil {
+		stat.TodayPointsDistributed += todayAdjustmentTotal
 	}
 
 	return &stat, nil
