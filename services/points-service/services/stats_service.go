@@ -189,48 +189,69 @@ func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, err
 				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task', 'Register QR Code Task', 'Creator Commission')
 			), 0) as completed_tasks,
 			-- Unique users: count all users who got points for this subnet
+			-- Use UNION to avoid double counting
 			COALESCE((
-				SELECT COUNT(DISTINCT ph.wallet_address)
-				FROM points_history ph 
-				LEFT JOIN tasks t2 ON (
-					CASE 
-						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
-						ELSE ph.tx_ref
-					END = t2.id
-				)
-				WHERE (t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci OR ph.subnet_id = s.id COLLATE utf8mb4_unicode_ci)
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task', 'Register QR Code Task', 'Creator Commission')
+				SELECT COUNT(DISTINCT wallet_address) FROM (
+					SELECT ph.wallet_address
+					FROM points_history ph 
+					WHERE ph.subnet_id = s.id COLLATE utf8mb4_unicode_ci
+					AND ph.source IN ('Chat Task', 'Creator Commission')
+					UNION
+					SELECT ph.wallet_address
+					FROM points_history ph 
+					INNER JOIN tasks t2 ON (
+						CASE 
+							WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+							ELSE ph.tx_ref
+						END = t2.id
+					)
+					WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
+					AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Register QR Code Task')
+				) AS all_users
 			), 0) as unique_users,
 			-- Total points distributed: sum all points for this subnet (including adjustments)
+			-- Split into two parts to avoid double counting
 			COALESCE((
 				SELECT SUM(ph.points) 
 				FROM points_history ph 
-				LEFT JOIN tasks t2 ON (
+				WHERE ph.subnet_id = s.id COLLATE utf8mb4_unicode_ci
+				AND ph.source IN ('Chat Task', 'Creator Commission')
+			), 0) + COALESCE((
+				SELECT SUM(ph.points) 
+				FROM points_history ph 
+				INNER JOIN tasks t2 ON (
 					CASE 
 						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
 						ELSE ph.tx_ref
 					END = t2.id
 				)
-				WHERE (t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci OR ph.subnet_id = s.id COLLATE utf8mb4_unicode_ci)
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task', 'Register QR Code Task', 'Creator Commission')
+				WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Register QR Code Task')
 			), 0) + COALESCE((
 				SELECT SUM(spa.adjustment_points)
 				FROM subnet_points_adjustment spa
 				WHERE spa.subnet_id = s.id COLLATE utf8mb4_unicode_ci
 			), 0) as total_points_distributed,
 			-- Today points distributed: sum today's points for this subnet (including today's adjustments)
+			-- Split into two parts to avoid double counting
 			COALESCE((
 				SELECT SUM(ph.points) 
 				FROM points_history ph 
-				LEFT JOIN tasks t2 ON (
+				WHERE ph.subnet_id = s.id COLLATE utf8mb4_unicode_ci
+				AND DATE(ph.created_at) = CURDATE()
+				AND ph.source IN ('Chat Task', 'Creator Commission')
+			), 0) + COALESCE((
+				SELECT SUM(ph.points) 
+				FROM points_history ph 
+				INNER JOIN tasks t2 ON (
 					CASE 
 						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
 						ELSE ph.tx_ref
 					END = t2.id
 				)
-				WHERE (t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci OR ph.subnet_id = s.id COLLATE utf8mb4_unicode_ci)
+				WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
 				AND DATE(ph.created_at) = CURDATE()
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task', 'Register QR Code Task', 'Creator Commission')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Register QR Code Task')
 			), 0) + COALESCE((
 				SELECT SUM(spa.adjustment_points)
 				FROM subnet_points_adjustment spa
@@ -238,18 +259,27 @@ func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, err
 				AND DATE(spa.created_at) = CURDATE()
 			), 0) as today_points_distributed,
 			-- Today active users: count users who got points today for this subnet
+			-- Use UNION to avoid double counting
 			COALESCE((
-				SELECT COUNT(DISTINCT ph.wallet_address)
-				FROM points_history ph 
-				LEFT JOIN tasks t2 ON (
-					CASE 
-						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
-						ELSE ph.tx_ref
-					END = t2.id
-				)
-				WHERE (t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci OR ph.subnet_id = s.id COLLATE utf8mb4_unicode_ci)
-				AND DATE(ph.created_at) = CURDATE()
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task', 'Register QR Code Task', 'Creator Commission')
+				SELECT COUNT(DISTINCT wallet_address) FROM (
+					SELECT ph.wallet_address
+					FROM points_history ph 
+					WHERE ph.subnet_id = s.id COLLATE utf8mb4_unicode_ci
+					AND DATE(ph.created_at) = CURDATE()
+					AND ph.source IN ('Chat Task', 'Creator Commission')
+					UNION
+					SELECT ph.wallet_address
+					FROM points_history ph 
+					INNER JOIN tasks t2 ON (
+						CASE 
+							WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+							ELSE ph.tx_ref
+						END = t2.id
+					)
+					WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
+					AND DATE(ph.created_at) = CURDATE()
+					AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Register QR Code Task')
+				) AS today_users
 			), 0) as today_active_users
 		FROM subnets s
 		LEFT JOIN tasks t ON s.id = t.subnet_id COLLATE utf8mb4_unicode_ci
@@ -329,48 +359,69 @@ func (ss *StatsService) GetSubnetDetails(ctx context.Context, subnetID string) (
 				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task', 'Register QR Code Task', 'Creator Commission')
 			), 0) as completed_tasks,
 			-- Unique users: count all users who got points for this subnet
+			-- Use UNION to avoid double counting
 			COALESCE((
-				SELECT COUNT(DISTINCT ph.wallet_address)
-				FROM points_history ph 
-				LEFT JOIN tasks t2 ON (
-					CASE 
-						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
-						ELSE ph.tx_ref
-					END = t2.id
-				)
-				WHERE (t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci OR ph.subnet_id = s.id COLLATE utf8mb4_unicode_ci)
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task', 'Register QR Code Task', 'Creator Commission')
+				SELECT COUNT(DISTINCT wallet_address) FROM (
+					SELECT ph.wallet_address
+					FROM points_history ph 
+					WHERE ph.subnet_id = s.id COLLATE utf8mb4_unicode_ci
+					AND ph.source IN ('Chat Task', 'Creator Commission')
+					UNION
+					SELECT ph.wallet_address
+					FROM points_history ph 
+					INNER JOIN tasks t2 ON (
+						CASE 
+							WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+							ELSE ph.tx_ref
+						END = t2.id
+					)
+					WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
+					AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Register QR Code Task')
+				) AS all_users
 			), 0) as unique_users,
 			-- Total points distributed: sum all points for this subnet (including adjustments)
+			-- Split into two parts to avoid double counting
 			COALESCE((
 				SELECT SUM(ph.points) 
 				FROM points_history ph 
-				LEFT JOIN tasks t2 ON (
+				WHERE ph.subnet_id = s.id COLLATE utf8mb4_unicode_ci
+				AND ph.source IN ('Chat Task', 'Creator Commission')
+			), 0) + COALESCE((
+				SELECT SUM(ph.points) 
+				FROM points_history ph 
+				INNER JOIN tasks t2 ON (
 					CASE 
 						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
 						ELSE ph.tx_ref
 					END = t2.id
 				)
-				WHERE (t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci OR ph.subnet_id = s.id COLLATE utf8mb4_unicode_ci)
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task', 'Register QR Code Task', 'Creator Commission')
+				WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Register QR Code Task')
 			), 0) + COALESCE((
 				SELECT SUM(spa.adjustment_points)
 				FROM subnet_points_adjustment spa
 				WHERE spa.subnet_id = s.id COLLATE utf8mb4_unicode_ci
 			), 0) as total_points_distributed,
 			-- Today points distributed: sum today's points for this subnet (including today's adjustments)
+			-- Split into two parts to avoid double counting
 			COALESCE((
 				SELECT SUM(ph.points) 
 				FROM points_history ph 
-				LEFT JOIN tasks t2 ON (
+				WHERE ph.subnet_id = s.id COLLATE utf8mb4_unicode_ci
+				AND DATE(ph.created_at) = CURDATE()
+				AND ph.source IN ('Chat Task', 'Creator Commission')
+			), 0) + COALESCE((
+				SELECT SUM(ph.points) 
+				FROM points_history ph 
+				INNER JOIN tasks t2 ON (
 					CASE 
 						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
 						ELSE ph.tx_ref
 					END = t2.id
 				)
-				WHERE (t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci OR ph.subnet_id = s.id COLLATE utf8mb4_unicode_ci)
+				WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
 				AND DATE(ph.created_at) = CURDATE()
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task', 'Register QR Code Task', 'Creator Commission')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Register QR Code Task')
 			), 0) + COALESCE((
 				SELECT SUM(spa.adjustment_points)
 				FROM subnet_points_adjustment spa
@@ -378,18 +429,27 @@ func (ss *StatsService) GetSubnetDetails(ctx context.Context, subnetID string) (
 				AND DATE(spa.created_at) = CURDATE()
 			), 0) as today_points_distributed,
 			-- Today active users: count users who got points today for this subnet
+			-- Use UNION to avoid double counting
 			COALESCE((
-				SELECT COUNT(DISTINCT ph.wallet_address)
-				FROM points_history ph 
-				LEFT JOIN tasks t2 ON (
-					CASE 
-						WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
-						ELSE ph.tx_ref
-					END = t2.id
-				)
-				WHERE (t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci OR ph.subnet_id = s.id COLLATE utf8mb4_unicode_ci)
-				AND DATE(ph.created_at) = CURDATE()
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Chat Task', 'Register QR Code Task', 'Creator Commission')
+				SELECT COUNT(DISTINCT wallet_address) FROM (
+					SELECT ph.wallet_address
+					FROM points_history ph 
+					WHERE ph.subnet_id = s.id COLLATE utf8mb4_unicode_ci
+					AND DATE(ph.created_at) = CURDATE()
+					AND ph.source IN ('Chat Task', 'Creator Commission')
+					UNION
+					SELECT ph.wallet_address
+					FROM points_history ph 
+					INNER JOIN tasks t2 ON (
+						CASE 
+							WHEN ph.tx_ref LIKE 'pocw-consensus-%' THEN SUBSTRING(ph.tx_ref, 16)
+							ELSE ph.tx_ref
+						END = t2.id
+					)
+					WHERE t2.subnet_id = s.id COLLATE utf8mb4_unicode_ci
+					AND DATE(ph.created_at) = CURDATE()
+					AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Twitter Follow Task', 'Telegram Task', 'Register QR Code Task')
+				) AS today_users
 			), 0) as today_active_users
 		FROM subnets s
 		LEFT JOIN tasks t ON s.id = t.subnet_id COLLATE utf8mb4_unicode_ci
