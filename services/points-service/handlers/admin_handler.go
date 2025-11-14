@@ -24,7 +24,7 @@ func NewAdminHandler(statsService *services.StatsService) *AdminHandler {
 type AddPointsAdjustmentRequest struct {
 	AdjustmentPoints int    `json:"adjustment_points" binding:"required"` // 可以是正数或负数
 	AdminWallet      string `json:"admin_wallet" binding:"required"`
-	Reason           string `json:"reason" binding:"required,max=20"` // 最多20个字（中文）
+	Reason           string `json:"reason" binding:"max=20"` // 最多20个字（中文），可为空
 }
 
 // AddPointsAdjustment 添加积分调整

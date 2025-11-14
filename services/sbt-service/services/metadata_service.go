@@ -209,11 +209,26 @@ func (ms *MetadataService) GetDynamicMetadata(ctx context.Context, walletAddress
 		todayContribution = 0
 	}
 
+	// Get adjustment points (from subnet_points_adjustment table)
+	adjustmentQuery := `
+		SELECT COALESCE(SUM(adjustment_points), 0)
+		FROM subnet_points_adjustment
+		WHERE wallet_address = ?
+	`
+	var adjustmentPoints int
+	err = ms.db.QueryRowContext(ctx, adjustmentQuery, walletAddress).Scan(&adjustmentPoints)
+	if err != nil {
+		adjustmentPoints = 0
+	}
+
+	// Calculate total points (profile total + adjustments)
+	totalPointsWithAdjustment := profile.TotalPoints + adjustmentPoints
+
 	// 3. Build dynamic attributes
 	dynamicAttrs := []models.Attribute{
 		{
 			TraitType:   "Total Points",
-			Value:       profile.TotalPoints,
+			Value:       totalPointsWithAdjustment,
 			DisplayType: "number",
 		},
 		{
@@ -540,14 +555,22 @@ func (ms *MetadataService) updateDynamicDataOnIPFS(ctx context.Context, walletAd
 }
 
 // getUserMiningTotalPoints calculates total points earned from task completion (mining)
+// Includes: task points, chat points, creator commission, and adjustment points
 func (ms *MetadataService) getUserMiningTotalPoints(ctx context.Context, walletAddress string) (int, error) {
 	query := `
 		SELECT COALESCE(SUM(points), 0) 
 		FROM points_history 
 		WHERE wallet_address = ? 
-		AND (source LIKE '%Task%' OR source LIKE '%Twitter%' OR source LIKE '%Retweet%')
-		AND source NOT LIKE '%NFT%' 
-		AND source NOT LIKE '%Invitation%'
+		AND source IN (
+			'VLC Distribution',
+			'Twitter Retweet Task',
+			'Twitter Post Task',
+			'Twitter Follow Task',
+			'Telegram Task',
+			'Chat Task',
+			'Register QR Code Task',
+			'Creator Commission'
+		)
 	`
 
 	var miningPoints int
@@ -556,7 +579,19 @@ func (ms *MetadataService) getUserMiningTotalPoints(ctx context.Context, walletA
 		return 0, fmt.Errorf("failed to get mining total points: %v", err)
 	}
 
-	return miningPoints, nil
+	// Add adjustment points from subnet_points_adjustment table
+	adjustmentQuery := `
+		SELECT COALESCE(SUM(adjustment_points), 0)
+		FROM subnet_points_adjustment
+		WHERE wallet_address = ?
+	`
+	var adjustmentPoints int
+	err = ms.db.QueryRowContext(ctx, adjustmentQuery, walletAddress).Scan(&adjustmentPoints)
+	if err != nil {
+		return miningPoints, fmt.Errorf("failed to get adjustment points: %v", err)
+	}
+
+	return miningPoints + adjustmentPoints, nil
 }
 
 // getUserConsecutiveMiningDays calculates consecutive days of mining (task completion)
