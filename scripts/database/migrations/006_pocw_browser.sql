@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS pocw_rounds (
     INDEX idx_phase (phase),
     INDEX idx_consensus_decision (consensus_decision),
     INDEX idx_created_at (created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='PoCW consensus rounds';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='PoCW consensus rounds';
 
 -- PoCW Votes Table
 -- Stores validator votes for quality assessment
@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS pocw_votes (
     INDEX idx_vote (vote),
     
     FOREIGN KEY (round_id) REFERENCES pocw_rounds(round_id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='PoCW validator votes';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='PoCW validator votes';
 
 -- PoCW Round Tasks Table
 -- Links tasks to rounds for tracking
@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS pocw_round_tasks (
     UNIQUE KEY uk_round_task (round_id, task_id),
     FOREIGN KEY (round_id) REFERENCES pocw_rounds(round_id) ON DELETE CASCADE,
     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='PoCW round task associations';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='PoCW round task associations';
 
 -- ============================================
 -- Views for Easy Querying
