@@ -5,6 +5,13 @@
 -- Created: 2025-11-21
 -- ============================================
 
+-- Drop existing tables and views if they exist (in reverse order due to foreign keys)
+DROP VIEW IF EXISTS pocw_validator_performance;
+DROP VIEW IF EXISTS pocw_round_summary;
+DROP TABLE IF EXISTS pocw_round_tasks;
+DROP TABLE IF EXISTS pocw_votes;
+DROP TABLE IF EXISTS pocw_rounds;
+
 -- PoCW Rounds Table
 -- Stores complete round lifecycle data
 CREATE TABLE IF NOT EXISTS pocw_rounds (
