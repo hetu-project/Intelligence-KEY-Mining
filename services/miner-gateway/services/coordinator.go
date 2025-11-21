@@ -86,6 +86,7 @@ type RoundCoordinator struct {
 	batchVerifier      *BatchVerifier
 	pointsClient       *points.Client
 	callbackService    *CallbackService
+	pocwStorage        *PoCWStorageService // PoCW data persistence
 
 	// Round management
 	currentRound *Round
@@ -121,6 +122,9 @@ func NewRoundCoordinator(
 		pointsClient = points.NewClient(pointsServiceURL)
 	}
 
+	// Initialize PoCW storage service
+	pocwStorage := NewPoCWStorageService(taskService.GetDB())
+
 	return &RoundCoordinator{
 		taskService:        taskService,
 		enhancedVLCService: enhancedVLCService,
@@ -128,6 +132,7 @@ func NewRoundCoordinator(
 		batchVerifier:      batchVerifier,
 		pointsClient:       pointsClient,
 		callbackService:    NewCallbackService(),
+		pocwStorage:        pocwStorage,
 		roundHistory:       make([]*Round, 0),
 		roundInterval:      time.Duration(roundIntervalSeconds) * time.Second,
 		consensusDelay:     time.Duration(consensusDelaySeconds) * time.Second,
@@ -274,6 +279,19 @@ func (rc *RoundCoordinator) startRound() (*Round, error) {
 	round.ValidatorVLC = validatorVLC
 
 	rc.currentRound = round
+
+	// Save round start to database
+	if err := rc.pocwStorage.SaveRoundStart(context.Background(), round); err != nil {
+		log.Printf("⚠️ Failed to save round start: %v", err)
+		// Don't fail the round, just log the error
+	}
+
+	// Save round tasks association
+	if len(round.Tasks) > 0 {
+		if err := rc.pocwStorage.SaveRoundTasks(context.Background(), round.ID, round.Tasks); err != nil {
+			log.Printf("⚠️ Failed to save round tasks: %v", err)
+		}
+	}
 
 	return round, nil
 }
@@ -450,6 +468,14 @@ func (rc *RoundCoordinator) qualityVotingPhase(round *Round) error {
 
 	log.Printf("Quality voting completed: %d votes collected from %d validators",
 		len(round.QualityVotes), len(validators))
+
+	// Save votes to database
+	for _, vote := range round.QualityVotes {
+		if err := rc.pocwStorage.SaveVote(ctx, round.ID, vote); err != nil {
+			log.Printf("⚠️ Failed to save vote: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -548,6 +574,11 @@ func (rc *RoundCoordinator) consensusPhase(round *Round) error {
 	log.Printf("✅ Consensus achieved: %s (%d approved, %d rejected)",
 		decision, overallApproved, overallRejected)
 
+	// Save consensus result to database
+	if err := rc.pocwStorage.UpdateRoundConsensus(context.Background(), round.ID, round.ConsensusResult); err != nil {
+		log.Printf("⚠️ Failed to save consensus result: %v", err)
+	}
+
 	return nil
 }
 
@@ -564,6 +595,11 @@ func (rc *RoundCoordinator) completeRound(round *Round, result string) {
 
 	// Process PoCW consensus results and handle points distribution
 	rc.handlePoCWConsensusResults(round, result)
+
+	// Save round completion to database
+	if err := rc.pocwStorage.CompleteRound(context.Background(), round, result); err != nil {
+		log.Printf("⚠️ Failed to save round completion: %v", err)
+	}
 
 	// Add to history
 	rc.roundHistory = append(rc.roundHistory, round)

@@ -252,6 +252,11 @@ func setupRoutes(
 			subnets.PUT("/:subnet_id/financial", subnetHandler.UpdateSubnetFinancialData)
 		}
 
+		// PoCW Browser API
+		pocwQueryService := services.NewPoCWQueryService(db)
+		pocwHandler := handlers.NewPoCWHandler(pocwQueryService)
+		pocwHandler.RegisterRoutes(v1)
+
 		// Batch verification operations (temporarily disabled - will be redesigned in step 4)
 		// TODO: Redesign batch verification as operations, not task types
 		/*

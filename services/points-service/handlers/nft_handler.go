@@ -550,22 +550,23 @@ func (nh *NFTHandler) HandleChatTaskReward(c *gin.Context) {
 	}
 
 	// Check if user has already completed a chat task for this subnet today
+	// NOTE: Daily limit check is temporarily disabled to allow multiple chat tasks per day
 	today := time.Now().Format("2006-01-02")
-	completed, err := nh.pointsService.CheckUserChatTaskToday(c.Request.Context(), req.UserWallet, req.SubnetID, today)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   "Failed to check daily completion status: " + err.Error(),
-		})
-		return
-	}
-	if completed {
-		c.JSON(http.StatusConflict, gin.H{
-			"success": false,
-			"error":   "User has already completed a chat task for this subnet today",
-		})
-		return
-	}
+	// completed, err := nh.pointsService.CheckUserChatTaskToday(c.Request.Context(), req.UserWallet, req.SubnetID, today)
+	// if err != nil {
+	// 	c.JSON(http.StatusInternalServerError, gin.H{
+	// 		"success": false,
+	// 		"error":   "Failed to check daily completion status: " + err.Error(),
+	// 	})
+	// 	return
+	// }
+	// if completed {
+	// 	c.JSON(http.StatusConflict, gin.H{
+	// 		"success": false,
+	// 		"error":   "User has already completed a chat task for this subnet today",
+	// 	})
+	// 	return
+	// }
 
 	// Check if user has NFT for bonus calculation
 	hasNFT, err := nh.nftService.CheckUserNFTOwnership(c.Request.Context(), req.UserWallet)
