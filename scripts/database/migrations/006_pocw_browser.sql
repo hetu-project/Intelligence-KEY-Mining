@@ -8,8 +8,7 @@
 -- PoCW Rounds Table
 -- Stores complete round lifecycle data
 CREATE TABLE IF NOT EXISTS pocw_rounds (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    round_id VARCHAR(100) UNIQUE NOT NULL COMMENT 'Unique round identifier (e.g., round_1731840000)',
+    round_id VARCHAR(100) PRIMARY KEY COMMENT 'Unique round identifier (e.g., round_1731840000)',
     start_time TIMESTAMP NOT NULL COMMENT 'Round start timestamp',
     end_time TIMESTAMP NULL COMMENT 'Round completion timestamp',
     phase VARCHAR(30) NOT NULL DEFAULT 'idle' COMMENT 'Current phase: idle, task_process, vlc_verify, quality_vote, consensus, complete',
@@ -139,7 +138,7 @@ SELECT
     r.created_at
 FROM pocw_rounds r
 LEFT JOIN pocw_votes v ON r.round_id = v.round_id
-GROUP BY r.id
+GROUP BY r.round_id
 ORDER BY r.start_time DESC;
 
 -- Validator performance view
