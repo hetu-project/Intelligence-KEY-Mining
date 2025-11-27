@@ -76,6 +76,53 @@ type VoteItem struct {
 	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 }
 
+// TaskListItem represents a task in the list view
+type TaskListItem struct {
+	TaskID      string     `json:"task_id"`
+	UserWallet  string     `json:"user_wallet"`
+	TaskType    string     `json:"task_type"`
+	SubnetID    string     `json:"subnet_id,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	RoundID     string     `json:"round_id,omitempty"`
+	Verdict     string     `json:"verdict"` // awaiting, approved, rejected
+	Credit      int        `json:"credit"`  // VLC increment
+	NewVLC      int64      `json:"new_vlc"` // User's VLC after this task
+	ProcessedAt *time.Time `json:"processed_at,omitempty"`
+}
+
+// TaskDetail represents detailed task information
+type TaskDetail struct {
+	TaskID      string     `json:"task_id"`
+	UserWallet  string     `json:"user_wallet"`
+	TaskType    string     `json:"task_type"`
+	SubnetID    string     `json:"subnet_id,omitempty"`
+	Status      string     `json:"status"`
+	CreatedAt   time.Time  `json:"created_at"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+
+	// PoCW Round info
+	RoundID     string     `json:"round_id,omitempty"`
+	ProcessedAt *time.Time `json:"processed_at,omitempty"`
+
+	// Consensus info
+	Verdict       string                 `json:"verdict"`
+	VLCIncrement  int                    `json:"vlc_increment"`
+	VLCBefore     int64                  `json:"vlc_before"`
+	VLCAfter      int64                  `json:"vlc_after"`
+	VLCSnapshot   map[string]interface{} `json:"vlc_snapshot,omitempty"`
+	PointsAwarded int                    `json:"points_awarded"`
+
+	// Task payload
+	Payload map[string]interface{} `json:"payload,omitempty"`
+	Proof   map[string]interface{} `json:"proof,omitempty"`
+
+	// Voting details
+	Votes        []VoteItem `json:"votes,omitempty"`
+	TotalVotes   int        `json:"total_votes"`
+	ApproveVotes int        `json:"approve_votes"`
+	RejectVotes  int        `json:"reject_votes"`
+}
+
 // ValidatorStats represents validator performance statistics
 type ValidatorStats struct {
 	ValidatorID     string  `json:"validator_id"`
@@ -86,6 +133,23 @@ type ValidatorStats struct {
 	AbstainCount    int     `json:"abstain_count"`
 	AvgQualityScore float64 `json:"avg_quality_score"`
 	ApproveRate     float64 `json:"approve_rate"`
+}
+
+// VLCNodeStats represents VLC statistics for a single node (miner or validator)
+type VLCNodeStats struct {
+	ProcessID       int       `json:"process_id"`
+	Role            string    `json:"role"`
+	CurrentValue    int64     `json:"current_value"`
+	RecentIncrement int64     `json:"recent_increment"`
+	LastUpdated     time.Time `json:"last_updated"`
+}
+
+// VLCStats represents overall VLC statistics
+type VLCStats struct {
+	Miners       []VLCNodeStats `json:"miners"`
+	Validators   []VLCNodeStats `json:"validators"`
+	TotalVLC     int64          `json:"total_vlc"`
+	SnapshotTime time.Time      `json:"snapshot_time"`
 }
 
 // DashboardStats represents dashboard statistics
@@ -538,4 +602,468 @@ func (pq *PoCWQueryService) GetRoundTrend(ctx context.Context, days int) ([]map[
 	}
 
 	return trend, nil
+}
+
+// GetTasksList retrieves paginated list of tasks with PoCW consensus info
+func (pq *PoCWQueryService) GetTasksList(ctx context.Context, page, limit int, filters map[string]string) ([]TaskListItem, int, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	offset := (page - 1) * limit
+
+	// Build WHERE clause based on filters
+	whereConditions := []string{}
+	args := []interface{}{}
+	argIndex := 1
+
+	if roundID, ok := filters["round_id"]; ok && roundID != "" {
+		whereConditions = append(whereConditions, fmt.Sprintf("rt.round_id = ?"))
+		args = append(args, roundID)
+		argIndex++
+	}
+
+	if userWallet, ok := filters["user_wallet"]; ok && userWallet != "" {
+		whereConditions = append(whereConditions, fmt.Sprintf("rt.user_wallet = ?"))
+		args = append(args, userWallet)
+		argIndex++
+	}
+
+	if taskType, ok := filters["task_type"]; ok && taskType != "" {
+		whereConditions = append(whereConditions, fmt.Sprintf("rt.task_type = ?"))
+		args = append(args, taskType)
+		argIndex++
+	}
+
+	if subnetID, ok := filters["subnet_id"]; ok && subnetID != "" {
+		whereConditions = append(whereConditions, fmt.Sprintf("rt.subnet_id = ?"))
+		args = append(args, subnetID)
+		argIndex++
+	}
+
+	if verdict, ok := filters["verdict"]; ok && verdict != "" {
+		if verdict == "awaiting" {
+			whereConditions = append(whereConditions, "rt.consensus_result IS NULL")
+		} else {
+			whereConditions = append(whereConditions, fmt.Sprintf("rt.consensus_result = ?"))
+			args = append(args, verdict)
+			argIndex++
+		}
+	}
+
+	whereClause := ""
+	if len(whereConditions) > 0 {
+		whereClause = "WHERE " + fmt.Sprintf("%s", whereConditions[0])
+		for i := 1; i < len(whereConditions); i++ {
+			whereClause += " AND " + whereConditions[i]
+		}
+	}
+
+	// Count total
+	countQuery := fmt.Sprintf(`
+		SELECT COUNT(*)
+		FROM pocw_round_tasks rt
+		LEFT JOIN tasks t ON rt.task_id = t.id
+		%s
+	`, whereClause)
+
+	var total int
+	err := pq.db.QueryRowContext(ctx, countQuery, args...).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count tasks: %w", err)
+	}
+
+	// Query tasks
+	query := fmt.Sprintf(`
+		SELECT 
+			rt.task_id,
+			rt.user_wallet,
+			rt.task_type,
+			rt.subnet_id,
+			t.created_at,
+			rt.round_id,
+			rt.consensus_result,
+			rt.vlc_increment,
+			rt.vlc_snapshot,
+			rt.processed_at
+		FROM pocw_round_tasks rt
+		LEFT JOIN tasks t ON rt.task_id = t.id
+		%s
+		ORDER BY rt.processed_at DESC
+		LIMIT ? OFFSET ?
+	`, whereClause)
+
+	args = append(args, limit, offset)
+	rows, err := pq.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query tasks: %w", err)
+	}
+	defer rows.Close()
+
+	tasks := make([]TaskListItem, 0)
+	for rows.Next() {
+		var task TaskListItem
+		var consensusResult sql.NullString
+		var vlcSnapshotJSON sql.NullString
+		var processedAt sql.NullTime
+		var createdAt sql.NullTime
+		var subnetID sql.NullString
+
+		err := rows.Scan(
+			&task.TaskID,
+			&task.UserWallet,
+			&task.TaskType,
+			&subnetID,
+			&createdAt,
+			&task.RoundID,
+			&consensusResult,
+			&task.Credit,
+			&vlcSnapshotJSON,
+			&processedAt,
+		)
+		if err != nil {
+			log.Printf("Error scanning task row: %v", err)
+			continue
+		}
+
+		if subnetID.Valid {
+			task.SubnetID = subnetID.String
+		}
+
+		if createdAt.Valid {
+			task.CreatedAt = createdAt.Time
+		}
+
+		if processedAt.Valid {
+			task.ProcessedAt = &processedAt.Time
+		}
+
+		// Determine verdict
+		if consensusResult.Valid {
+			task.Verdict = consensusResult.String
+		} else {
+			task.Verdict = "awaiting"
+		}
+
+		// Extract user's VLC from snapshot
+		if vlcSnapshotJSON.Valid && vlcSnapshotJSON.String != "" {
+			var vlcSnapshot map[string]interface{}
+			if err := json.Unmarshal([]byte(vlcSnapshotJSON.String), &vlcSnapshot); err == nil {
+				// VLC snapshot structure: {"process_id": 1, "values": {"1": 1001, "2": 500}}
+				if values, ok := vlcSnapshot["values"].(map[string]interface{}); ok {
+					if processID, ok := vlcSnapshot["process_id"].(float64); ok {
+						processIDStr := fmt.Sprintf("%.0f", processID)
+						if vlc, ok := values[processIDStr].(float64); ok {
+							task.NewVLC = int64(vlc)
+						}
+					}
+				}
+			}
+		}
+
+		tasks = append(tasks, task)
+	}
+
+	return tasks, total, nil
+}
+
+// GetTaskDetail retrieves detailed information about a specific task
+func (pq *PoCWQueryService) GetTaskDetail(ctx context.Context, taskID string) (*TaskDetail, error) {
+	query := `
+		SELECT 
+			t.id,
+			t.user_wallet,
+			t.task_type,
+			t.subnet_id,
+			t.status,
+			t.created_at,
+			t.completed_at,
+			t.payload,
+			t.proof,
+			rt.round_id,
+			rt.processed_at,
+			rt.consensus_result,
+			rt.vlc_increment,
+			rt.vlc_snapshot,
+			rt.points_awarded
+		FROM tasks t
+		LEFT JOIN pocw_round_tasks rt ON t.id = rt.task_id
+		WHERE t.id = ?
+	`
+
+	var detail TaskDetail
+	var subnetID, status sql.NullString
+	var completedAt, processedAt sql.NullTime
+	var roundID, consensusResult sql.NullString
+	var payloadJSON, proofJSON, vlcSnapshotJSON sql.NullString
+	var vlcIncrement, pointsAwarded sql.NullInt64
+
+	err := pq.db.QueryRowContext(ctx, query, taskID).Scan(
+		&detail.TaskID,
+		&detail.UserWallet,
+		&detail.TaskType,
+		&subnetID,
+		&status,
+		&detail.CreatedAt,
+		&completedAt,
+		&payloadJSON,
+		&proofJSON,
+		&roundID,
+		&processedAt,
+		&consensusResult,
+		&vlcIncrement,
+		&vlcSnapshotJSON,
+		&pointsAwarded,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("task not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to query task: %w", err)
+	}
+
+	// Set optional fields
+	if subnetID.Valid {
+		detail.SubnetID = subnetID.String
+	}
+	if status.Valid {
+		detail.Status = status.String
+	}
+	if completedAt.Valid {
+		detail.CompletedAt = &completedAt.Time
+	}
+	if roundID.Valid {
+		detail.RoundID = roundID.String
+	}
+	if processedAt.Valid {
+		detail.ProcessedAt = &processedAt.Time
+	}
+	if vlcIncrement.Valid {
+		detail.VLCIncrement = int(vlcIncrement.Int64)
+	}
+	if pointsAwarded.Valid {
+		detail.PointsAwarded = int(pointsAwarded.Int64)
+	}
+
+	// Determine verdict
+	if consensusResult.Valid {
+		detail.Verdict = consensusResult.String
+	} else if roundID.Valid {
+		detail.Verdict = "awaiting"
+	} else {
+		detail.Verdict = "not_in_consensus"
+	}
+
+	// Parse JSON fields
+	if payloadJSON.Valid && payloadJSON.String != "" {
+		if err := json.Unmarshal([]byte(payloadJSON.String), &detail.Payload); err != nil {
+			log.Printf("Error parsing payload JSON: %v", err)
+		}
+	}
+
+	if proofJSON.Valid && proofJSON.String != "" {
+		if err := json.Unmarshal([]byte(proofJSON.String), &detail.Proof); err != nil {
+			log.Printf("Error parsing proof JSON: %v", err)
+		}
+	}
+
+	if vlcSnapshotJSON.Valid && vlcSnapshotJSON.String != "" {
+		if err := json.Unmarshal([]byte(vlcSnapshotJSON.String), &detail.VLCSnapshot); err != nil {
+			log.Printf("Error parsing VLC snapshot JSON: %v", err)
+		} else {
+			// Calculate VLC before and after
+			// VLC snapshot structure: {"process_id": 1, "values": {"1": 1001, "2": 500}}
+			if values, ok := detail.VLCSnapshot["values"].(map[string]interface{}); ok {
+				if processID, ok := detail.VLCSnapshot["process_id"].(float64); ok {
+					processIDStr := fmt.Sprintf("%.0f", processID)
+					if vlc, ok := values[processIDStr].(float64); ok {
+						detail.VLCAfter = int64(vlc)
+						detail.VLCBefore = detail.VLCAfter - int64(detail.VLCIncrement)
+					}
+				}
+			}
+		}
+	}
+
+	// Get votes for this task
+	votesQuery := `
+		SELECT 
+			validator_id,
+			validator_role,
+			vote,
+			quality_score,
+			weight,
+			reasoning,
+			vote_timestamp
+		FROM pocw_votes
+		WHERE task_id = ?
+		ORDER BY vote_timestamp ASC
+	`
+
+	rows, err := pq.db.QueryContext(ctx, votesQuery, taskID)
+	if err != nil {
+		log.Printf("Error querying votes: %v", err)
+	} else {
+		defer rows.Close()
+
+		votes := make([]VoteItem, 0)
+		approveCount := 0
+		rejectCount := 0
+
+		for rows.Next() {
+			var vote VoteItem
+			var validatorRole, reasoning sql.NullString
+			var qualityScore, weight sql.NullFloat64
+
+			err := rows.Scan(
+				&vote.ValidatorID,
+				&validatorRole,
+				&vote.Vote,
+				&qualityScore,
+				&weight,
+				&reasoning,
+				&vote.VoteTimestamp,
+			)
+			if err != nil {
+				log.Printf("Error scanning vote row: %v", err)
+				continue
+			}
+
+			vote.TaskID = taskID
+			if validatorRole.Valid {
+				vote.ValidatorRole = validatorRole.String
+			}
+			if qualityScore.Valid {
+				vote.QualityScore = qualityScore.Float64
+			}
+			if weight.Valid {
+				vote.Weight = weight.Float64
+			}
+			if reasoning.Valid {
+				vote.Reasoning = reasoning.String
+			}
+
+			if vote.Vote == "approve" {
+				approveCount++
+			} else if vote.Vote == "reject" {
+				rejectCount++
+			}
+
+			votes = append(votes, vote)
+		}
+
+		detail.Votes = votes
+		detail.TotalVotes = len(votes)
+		detail.ApproveVotes = approveCount
+		detail.RejectVotes = rejectCount
+	}
+
+	return &detail, nil
+}
+
+// GetVLCStats retrieves current VLC statistics for all nodes
+func (pq *PoCWQueryService) GetVLCStats(ctx context.Context) (*VLCStats, error) {
+	// Get the latest round with VLC data
+	query := `
+		SELECT 
+			miner_vlc_after,
+			validator_vlc,
+			end_time
+		FROM pocw_rounds
+		WHERE miner_vlc_after IS NOT NULL
+		ORDER BY start_time DESC
+		LIMIT 1
+	`
+
+	var minerVLCJSON, validatorVLCJSON sql.NullString
+	var snapshotTime sql.NullTime
+
+	err := pq.db.QueryRowContext(ctx, query).Scan(&minerVLCJSON, &validatorVLCJSON, &snapshotTime)
+	if err == sql.ErrNoRows {
+		// No VLC data yet, return empty stats
+		return &VLCStats{
+			Miners:       []VLCNodeStats{},
+			Validators:   []VLCNodeStats{},
+			TotalVLC:     0,
+			SnapshotTime: time.Now(),
+		}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to query VLC data: %w", err)
+	}
+
+	stats := &VLCStats{
+		Miners:     []VLCNodeStats{},
+		Validators: []VLCNodeStats{},
+		TotalVLC:   0,
+	}
+
+	if snapshotTime.Valid {
+		stats.SnapshotTime = snapshotTime.Time
+	} else {
+		stats.SnapshotTime = time.Now()
+	}
+
+	// Parse miner VLC
+	if minerVLCJSON.Valid && minerVLCJSON.String != "" {
+		var minerVLC map[string]interface{}
+		if err := json.Unmarshal([]byte(minerVLCJSON.String), &minerVLC); err == nil {
+			if values, ok := minerVLC["values"].(map[string]interface{}); ok {
+				for processIDStr, vlcValue := range values {
+					if vlc, ok := vlcValue.(float64); ok {
+						processID := 0
+						fmt.Sscanf(processIDStr, "%d", &processID)
+
+						stats.Miners = append(stats.Miners, VLCNodeStats{
+							ProcessID:       processID,
+							Role:            "miner",
+							CurrentValue:    int64(vlc),
+							RecentIncrement: 0, // TODO: Calculate from previous round
+							LastUpdated:     stats.SnapshotTime,
+						})
+						stats.TotalVLC += int64(vlc)
+					}
+				}
+			}
+		}
+	}
+
+	// Parse validator VLC
+	if validatorVLCJSON.Valid && validatorVLCJSON.String != "" {
+		var validatorVLC map[string]interface{}
+		if err := json.Unmarshal([]byte(validatorVLCJSON.String), &validatorVLC); err == nil {
+			if values, ok := validatorVLC["values"].(map[string]interface{}); ok {
+				for processIDStr, vlcValue := range values {
+					if vlc, ok := vlcValue.(float64); ok {
+						processID := 0
+						fmt.Sscanf(processIDStr, "%d", &processID)
+
+						// Determine validator role based on process ID
+						role := "validator"
+						if processID == 2 {
+							role = "ui_validator"
+						} else if processID == 3 {
+							role = "format_validator"
+						} else if processID == 4 {
+							role = "semantic_validator"
+						}
+
+						stats.Validators = append(stats.Validators, VLCNodeStats{
+							ProcessID:       processID,
+							Role:            role,
+							CurrentValue:    int64(vlc),
+							RecentIncrement: 0, // TODO: Calculate from previous round
+							LastUpdated:     stats.SnapshotTime,
+						})
+						stats.TotalVLC += int64(vlc)
+					}
+				}
+			}
+		}
+	}
+
+	return stats, nil
 }

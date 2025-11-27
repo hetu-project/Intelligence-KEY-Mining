@@ -1,8 +1,23 @@
 -- ============================================
--- PoCW Browser Tables
+-- PoCW Browser Tables Migration
 -- ============================================
 -- Purpose: Store PoCW consensus round data for browser visualization
 -- Created: 2025-11-21
+-- Version: 1.0
+-- ============================================
+-- 
+-- ⚠️  WARNING: This script will DROP existing PoCW tables and recreate them!
+-- ⚠️  All existing PoCW browser data will be LOST!
+-- 
+-- This is safe for:
+--   ✓ Initial setup (no data exists)
+--   ✓ Development environments (data can be regenerated)
+--   ✓ Schema updates (when you need to modify table structure)
+-- 
+-- For production with existing data, consider:
+--   - Backing up data first
+--   - Using ALTER TABLE instead of DROP/CREATE
+--   - Creating a separate migration script
 -- ============================================
 
 -- Drop existing tables and views if they exist (in reverse order due to foreign keys)

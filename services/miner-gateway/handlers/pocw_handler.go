@@ -30,6 +30,13 @@ func (h *PoCWHandler) RegisterRoutes(router *gin.RouterGroup) {
 		pocw.GET("/rounds/:round_id/tasks", h.GetRoundTasks)
 		pocw.GET("/rounds/:round_id/votes", h.GetRoundVotes)
 
+		// Task endpoints
+		pocw.GET("/tasks", h.GetTasksList)
+		pocw.GET("/tasks/:task_id", h.GetTaskDetail)
+
+		// VLC endpoints
+		pocw.GET("/vlc/stats", h.GetVLCStats)
+
 		// Statistics endpoints
 		pocw.GET("/stats/dashboard", h.GetDashboardStats)
 		pocw.GET("/stats/validators", h.GetValidatorStats)
@@ -274,5 +281,132 @@ func (h *PoCWHandler) GetRoundTrend(c *gin.Context) {
 			"trend": trend,
 			"days":  days,
 		},
+	})
+}
+
+// GetTasksList godoc
+// @Summary Get tasks list
+// @Description Get paginated list of tasks with PoCW consensus information
+// @Tags PoCW
+// @Accept json
+// @Produce json
+// @Param page query int false "Page number" default(1)
+// @Param limit query int false "Items per page (max 100)" default(20)
+// @Param round_id query string false "Filter by round ID"
+// @Param user_wallet query string false "Filter by user wallet"
+// @Param task_type query string false "Filter by task type"
+// @Param subnet_id query string false "Filter by subnet ID"
+// @Param verdict query string false "Filter by verdict (awaiting, approved, rejected)"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/pocw/tasks [get]
+func (h *PoCWHandler) GetTasksList(c *gin.Context) {
+	// Parse pagination
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+
+	// Parse filters
+	filters := make(map[string]string)
+	if roundID := c.Query("round_id"); roundID != "" {
+		filters["round_id"] = roundID
+	}
+	if userWallet := c.Query("user_wallet"); userWallet != "" {
+		filters["user_wallet"] = userWallet
+	}
+	if taskType := c.Query("task_type"); taskType != "" {
+		filters["task_type"] = taskType
+	}
+	if subnetID := c.Query("subnet_id"); subnetID != "" {
+		filters["subnet_id"] = subnetID
+	}
+	if verdict := c.Query("verdict"); verdict != "" {
+		filters["verdict"] = verdict
+	}
+
+	tasks, total, err := h.queryService.GetTasksList(c.Request.Context(), page, limit, filters)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to get tasks list: " + err.Error(),
+		})
+		return
+	}
+
+	totalPages := (total + limit - 1) / limit
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"tasks":       tasks,
+			"total":       total,
+			"page":        page,
+			"limit":       limit,
+			"total_pages": totalPages,
+		},
+	})
+}
+
+// GetTaskDetail godoc
+// @Summary Get task detail
+// @Description Get detailed information about a specific task including votes
+// @Tags PoCW
+// @Accept json
+// @Produce json
+// @Param task_id path string true "Task ID"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/pocw/tasks/{task_id} [get]
+func (h *PoCWHandler) GetTaskDetail(c *gin.Context) {
+	taskID := c.Param("task_id")
+	if taskID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Task ID is required",
+		})
+		return
+	}
+
+	detail, err := h.queryService.GetTaskDetail(c.Request.Context(), taskID)
+	if err != nil {
+		if err.Error() == "task not found" {
+			c.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"error":   "Task not found",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to get task detail: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    detail,
+	})
+}
+
+// GetVLCStats godoc
+// @Summary Get VLC statistics
+// @Description Get current VLC statistics for all miners and validators
+// @Tags PoCW
+// @Accept json
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/pocw/vlc/stats [get]
+func (h *PoCWHandler) GetVLCStats(c *gin.Context) {
+	stats, err := h.queryService.GetVLCStats(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to get VLC stats: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    stats,
 	})
 }
