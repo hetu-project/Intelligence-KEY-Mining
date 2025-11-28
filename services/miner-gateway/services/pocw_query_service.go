@@ -1134,6 +1134,14 @@ func (pq *PoCWQueryService) GetVLCStats(ctx context.Context) (*VLCStats, error) 
 						stats.TotalVLC += currentValue
 					}
 				}
+
+				// If values is empty, add default miner with 0
+				if len(values) == 0 {
+					log.Printf(" Miner VLC values is empty, adding default miner")
+					stats.Miners = []VLCNodeStats{
+						{ProcessID: 1, Role: "miner", CurrentValue: 0, RecentIncrement: 0, LastUpdated: stats.SnapshotTime},
+					}
+				}
 			}
 		}
 	}
