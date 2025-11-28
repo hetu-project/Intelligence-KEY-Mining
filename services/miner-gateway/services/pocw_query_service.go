@@ -1107,6 +1107,11 @@ func (pq *PoCWQueryService) GetVLCStats(ctx context.Context) (*VLCStats, error) 
 		var minerVLC map[string]interface{}
 		if err := json.Unmarshal([]byte(currentMinerVLCJSON.String), &minerVLC); err == nil {
 			if values, ok := minerVLC["values"].(map[string]interface{}); ok {
+				// Clear the default miners if we have valid data
+				if len(stats.Miners) > 0 && stats.Miners[0].CurrentValue == 0 {
+					stats.Miners = []VLCNodeStats{}
+				}
+
 				for processIDStr, vlcValue := range values {
 					if vlc, ok := vlcValue.(float64); ok {
 						processID := 0
