@@ -970,7 +970,7 @@ func (pq *PoCWQueryService) GetTaskDetail(ctx context.Context, taskID string) (*
 
 // GetVLCStats retrieves current VLC statistics for all nodes
 func (pq *PoCWQueryService) GetVLCStats(ctx context.Context) (*VLCStats, error) {
-	// Get the latest round (prefer miner_vlc_after, fallback to miner_vlc_before)
+	// Get the latest two rounds to calculate increment
 	query := `
 		SELECT 
 			COALESCE(miner_vlc_after, miner_vlc_before) as miner_vlc,
@@ -978,13 +978,45 @@ func (pq *PoCWQueryService) GetVLCStats(ctx context.Context) (*VLCStats, error) 
 			end_time
 		FROM pocw_rounds
 		ORDER BY start_time DESC
-		LIMIT 1
+		LIMIT 2
 	`
 
-	var minerVLCJSON, validatorVLCJSON sql.NullString
+	rows, err := pq.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query VLC data: %w", err)
+	}
+	defer rows.Close()
+
+	var currentMinerVLCJSON, currentValidatorVLCJSON sql.NullString
+	var previousMinerVLCJSON, previousValidatorVLCJSON sql.NullString
 	var snapshotTime sql.NullTime
 
-	err := pq.db.QueryRowContext(ctx, query).Scan(&minerVLCJSON, &validatorVLCJSON, &snapshotTime)
+	// Get current round (first row)
+	if !rows.Next() {
+		// No rounds yet, return initial state
+		return &VLCStats{
+			Miners: []VLCNodeStats{
+				{ProcessID: 1, Role: "miner", CurrentValue: 0, RecentIncrement: 0, LastUpdated: time.Now()},
+			},
+			Validators: []VLCNodeStats{
+				{ProcessID: 2, Role: "ui_validator", CurrentValue: 0, RecentIncrement: 0, LastUpdated: time.Now()},
+				{ProcessID: 3, Role: "format_validator", CurrentValue: 0, RecentIncrement: 0, LastUpdated: time.Now()},
+				{ProcessID: 4, Role: "semantic_validator", CurrentValue: 0, RecentIncrement: 0, LastUpdated: time.Now()},
+			},
+			TotalVLC:     0,
+			SnapshotTime: time.Now(),
+		}, nil
+	}
+
+	err = rows.Scan(&currentMinerVLCJSON, &currentValidatorVLCJSON, &snapshotTime)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan current round: %w", err)
+	}
+
+	// Get previous round (second row) if exists
+	if rows.Next() {
+		rows.Scan(&previousMinerVLCJSON, &previousValidatorVLCJSON, &sql.NullTime{})
+	}
 	if err == sql.ErrNoRows {
 		// No rounds yet, return initial state
 		return &VLCStats{
@@ -1016,8 +1048,8 @@ func (pq *PoCWQueryService) GetVLCStats(ctx context.Context) (*VLCStats, error) 
 		stats.SnapshotTime = time.Now()
 	}
 
-	// If VLC data is NULL, return initial state
-	if !minerVLCJSON.Valid && !validatorVLCJSON.Valid {
+	// If both VLC data are NULL, return initial state
+	if !currentMinerVLCJSON.Valid && !currentValidatorVLCJSON.Valid {
 		stats.Miners = []VLCNodeStats{
 			{ProcessID: 1, Role: "miner", CurrentValue: 0, RecentIncrement: 0, LastUpdated: stats.SnapshotTime},
 		}
@@ -1029,39 +1061,88 @@ func (pq *PoCWQueryService) GetVLCStats(ctx context.Context) (*VLCStats, error) 
 		return stats, nil
 	}
 
-	// Parse miner VLC
-	if minerVLCJSON.Valid && minerVLCJSON.String != "" {
-		var minerVLC map[string]interface{}
-		if err := json.Unmarshal([]byte(minerVLCJSON.String), &minerVLC); err == nil {
-			if values, ok := minerVLC["values"].(map[string]interface{}); ok {
+	// If only miner VLC is NULL, initialize it with 0
+	if !currentMinerVLCJSON.Valid {
+		stats.Miners = []VLCNodeStats{
+			{ProcessID: 1, Role: "miner", CurrentValue: 0, RecentIncrement: 0, LastUpdated: stats.SnapshotTime},
+		}
+	}
+
+	// Parse previous VLC values for increment calculation
+	previousMinerValues := make(map[int]int64)
+	previousValidatorValues := make(map[int]int64)
+
+	if previousMinerVLCJSON.Valid && previousMinerVLCJSON.String != "" {
+		var prevMinerVLC map[string]interface{}
+		if err := json.Unmarshal([]byte(previousMinerVLCJSON.String), &prevMinerVLC); err == nil {
+			if values, ok := prevMinerVLC["values"].(map[string]interface{}); ok {
 				for processIDStr, vlcValue := range values {
 					if vlc, ok := vlcValue.(float64); ok {
 						processID := 0
 						fmt.Sscanf(processIDStr, "%d", &processID)
-
-						stats.Miners = append(stats.Miners, VLCNodeStats{
-							ProcessID:       processID,
-							Role:            "miner",
-							CurrentValue:    int64(vlc),
-							RecentIncrement: 0, // TODO: Calculate from previous round
-							LastUpdated:     stats.SnapshotTime,
-						})
-						stats.TotalVLC += int64(vlc)
+						previousMinerValues[processID] = int64(vlc)
 					}
 				}
 			}
 		}
 	}
 
-	// Parse validator VLC
-	if validatorVLCJSON.Valid && validatorVLCJSON.String != "" {
+	if previousValidatorVLCJSON.Valid && previousValidatorVLCJSON.String != "" {
+		var prevValidatorVLC map[string]interface{}
+		if err := json.Unmarshal([]byte(previousValidatorVLCJSON.String), &prevValidatorVLC); err == nil {
+			if values, ok := prevValidatorVLC["values"].(map[string]interface{}); ok {
+				for processIDStr, vlcValue := range values {
+					if vlc, ok := vlcValue.(float64); ok {
+						processID := 0
+						fmt.Sscanf(processIDStr, "%d", &processID)
+						previousValidatorValues[processID] = int64(vlc)
+					}
+				}
+			}
+		}
+	}
+
+	// Parse current miner VLC
+	if currentMinerVLCJSON.Valid && currentMinerVLCJSON.String != "" {
+		var minerVLC map[string]interface{}
+		if err := json.Unmarshal([]byte(currentMinerVLCJSON.String), &minerVLC); err == nil {
+			if values, ok := minerVLC["values"].(map[string]interface{}); ok {
+				for processIDStr, vlcValue := range values {
+					if vlc, ok := vlcValue.(float64); ok {
+						processID := 0
+						fmt.Sscanf(processIDStr, "%d", &processID)
+
+						currentValue := int64(vlc)
+						previousValue := previousMinerValues[processID]
+						increment := currentValue - previousValue
+
+						stats.Miners = append(stats.Miners, VLCNodeStats{
+							ProcessID:       processID,
+							Role:            "miner",
+							CurrentValue:    currentValue,
+							RecentIncrement: increment,
+							LastUpdated:     stats.SnapshotTime,
+						})
+						stats.TotalVLC += currentValue
+					}
+				}
+			}
+		}
+	}
+
+	// Parse current validator VLC
+	if currentValidatorVLCJSON.Valid && currentValidatorVLCJSON.String != "" {
 		var validatorVLC map[string]interface{}
-		if err := json.Unmarshal([]byte(validatorVLCJSON.String), &validatorVLC); err == nil {
+		if err := json.Unmarshal([]byte(currentValidatorVLCJSON.String), &validatorVLC); err == nil {
 			if values, ok := validatorVLC["values"].(map[string]interface{}); ok {
 				for processIDStr, vlcValue := range values {
 					if vlc, ok := vlcValue.(float64); ok {
 						processID := 0
 						fmt.Sscanf(processIDStr, "%d", &processID)
+
+						currentValue := int64(vlc)
+						previousValue := previousValidatorValues[processID]
+						increment := currentValue - previousValue
 
 						// Determine validator role based on process ID
 						role := "validator"
@@ -1076,11 +1157,11 @@ func (pq *PoCWQueryService) GetVLCStats(ctx context.Context) (*VLCStats, error) 
 						stats.Validators = append(stats.Validators, VLCNodeStats{
 							ProcessID:       processID,
 							Role:            role,
-							CurrentValue:    int64(vlc),
-							RecentIncrement: 0, // TODO: Calculate from previous round
+							CurrentValue:    currentValue,
+							RecentIncrement: increment,
 							LastUpdated:     stats.SnapshotTime,
 						})
-						stats.TotalVLC += int64(vlc)
+						stats.TotalVLC += currentValue
 					}
 				}
 			}
