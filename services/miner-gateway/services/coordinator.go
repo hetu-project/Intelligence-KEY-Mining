@@ -579,6 +579,26 @@ func (rc *RoundCoordinator) consensusPhase(round *Round) error {
 		log.Printf("⚠️ Failed to save consensus result: %v", err)
 	}
 
+	// Update each task's consensus result
+	for taskID, result := range taskConsensus {
+		consensusAchieved := result.TotalWeight > 2.0
+		isAccepted := consensusAchieved && result.AcceptWeightVotes > (result.TotalWeight/2.0)
+
+		taskDecision := "awaiting"
+		if consensusAchieved {
+			if isAccepted {
+				taskDecision = "approved"
+			} else {
+				taskDecision = "rejected"
+			}
+		}
+
+		// Update task consensus result in database
+		if err := rc.pocwStorage.UpdateTaskConsensusResult(context.Background(), round.ID, taskID, taskDecision, 0); err != nil {
+			log.Printf("⚠️ Failed to update task %s consensus result: %v", taskID, err)
+		}
+	}
+
 	return nil
 }
 

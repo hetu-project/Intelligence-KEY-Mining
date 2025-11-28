@@ -687,9 +687,11 @@ func (pq *PoCWQueryService) GetTasksList(ctx context.Context, page, limit int, f
 			rt.consensus_result,
 			rt.vlc_increment,
 			rt.vlc_snapshot,
-			rt.processed_at
+			rt.processed_at,
+			COALESCE(r.miner_vlc_after, r.miner_vlc_before) as round_vlc
 		FROM pocw_round_tasks rt
 		LEFT JOIN tasks t ON rt.task_id = t.id
+		LEFT JOIN pocw_rounds r ON rt.round_id = r.round_id
 		%s
 		ORDER BY rt.processed_at DESC
 		LIMIT ? OFFSET ?
@@ -707,6 +709,7 @@ func (pq *PoCWQueryService) GetTasksList(ctx context.Context, page, limit int, f
 		var task TaskListItem
 		var consensusResult sql.NullString
 		var vlcSnapshotJSON sql.NullString
+		var roundVLCJSON sql.NullString
 		var processedAt sql.NullTime
 		var createdAt sql.NullTime
 		var subnetID sql.NullString
@@ -722,6 +725,7 @@ func (pq *PoCWQueryService) GetTasksList(ctx context.Context, page, limit int, f
 			&task.Credit,
 			&vlcSnapshotJSON,
 			&processedAt,
+			&roundVLCJSON,
 		)
 		if err != nil {
 			log.Printf("Error scanning task row: %v", err)
@@ -747,13 +751,13 @@ func (pq *PoCWQueryService) GetTasksList(ctx context.Context, page, limit int, f
 			task.Verdict = "awaiting"
 		}
 
-		// Extract user's VLC from snapshot
-		if vlcSnapshotJSON.Valid && vlcSnapshotJSON.String != "" {
-			var vlcSnapshot map[string]interface{}
-			if err := json.Unmarshal([]byte(vlcSnapshotJSON.String), &vlcSnapshot); err == nil {
-				// VLC snapshot structure: {"process_id": 1, "values": {"1": 1001, "2": 500}}
-				if values, ok := vlcSnapshot["values"].(map[string]interface{}); ok {
-					if processID, ok := vlcSnapshot["process_id"].(float64); ok {
+		// Extract Miner's VLC from Round VLC (prefer this over task vlc_snapshot)
+		if roundVLCJSON.Valid && roundVLCJSON.String != "" {
+			var roundVLC map[string]interface{}
+			if err := json.Unmarshal([]byte(roundVLCJSON.String), &roundVLC); err == nil {
+				// VLC structure: {"process_id": 1, "values": {"1": 3}}
+				if values, ok := roundVLC["values"].(map[string]interface{}); ok {
+					if processID, ok := roundVLC["process_id"].(float64); ok {
 						processIDStr := fmt.Sprintf("%.0f", processID)
 						if vlc, ok := values[processIDStr].(float64); ok {
 							task.NewVLC = int64(vlc)
@@ -966,14 +970,13 @@ func (pq *PoCWQueryService) GetTaskDetail(ctx context.Context, taskID string) (*
 
 // GetVLCStats retrieves current VLC statistics for all nodes
 func (pq *PoCWQueryService) GetVLCStats(ctx context.Context) (*VLCStats, error) {
-	// Get the latest round with VLC data
+	// Get the latest round (prefer miner_vlc_after, fallback to miner_vlc_before)
 	query := `
 		SELECT 
-			miner_vlc_after,
+			COALESCE(miner_vlc_after, miner_vlc_before) as miner_vlc,
 			validator_vlc,
 			end_time
 		FROM pocw_rounds
-		WHERE miner_vlc_after IS NOT NULL
 		ORDER BY start_time DESC
 		LIMIT 1
 	`
@@ -983,10 +986,16 @@ func (pq *PoCWQueryService) GetVLCStats(ctx context.Context) (*VLCStats, error) 
 
 	err := pq.db.QueryRowContext(ctx, query).Scan(&minerVLCJSON, &validatorVLCJSON, &snapshotTime)
 	if err == sql.ErrNoRows {
-		// No VLC data yet, return empty stats
+		// No rounds yet, return initial state
 		return &VLCStats{
-			Miners:       []VLCNodeStats{},
-			Validators:   []VLCNodeStats{},
+			Miners: []VLCNodeStats{
+				{ProcessID: 1, Role: "miner", CurrentValue: 0, RecentIncrement: 0, LastUpdated: time.Now()},
+			},
+			Validators: []VLCNodeStats{
+				{ProcessID: 2, Role: "ui_validator", CurrentValue: 0, RecentIncrement: 0, LastUpdated: time.Now()},
+				{ProcessID: 3, Role: "format_validator", CurrentValue: 0, RecentIncrement: 0, LastUpdated: time.Now()},
+				{ProcessID: 4, Role: "semantic_validator", CurrentValue: 0, RecentIncrement: 0, LastUpdated: time.Now()},
+			},
 			TotalVLC:     0,
 			SnapshotTime: time.Now(),
 		}, nil
@@ -1005,6 +1014,19 @@ func (pq *PoCWQueryService) GetVLCStats(ctx context.Context) (*VLCStats, error) 
 		stats.SnapshotTime = snapshotTime.Time
 	} else {
 		stats.SnapshotTime = time.Now()
+	}
+
+	// If VLC data is NULL, return initial state
+	if !minerVLCJSON.Valid && !validatorVLCJSON.Valid {
+		stats.Miners = []VLCNodeStats{
+			{ProcessID: 1, Role: "miner", CurrentValue: 0, RecentIncrement: 0, LastUpdated: stats.SnapshotTime},
+		}
+		stats.Validators = []VLCNodeStats{
+			{ProcessID: 2, Role: "ui_validator", CurrentValue: 0, RecentIncrement: 0, LastUpdated: stats.SnapshotTime},
+			{ProcessID: 3, Role: "format_validator", CurrentValue: 0, RecentIncrement: 0, LastUpdated: stats.SnapshotTime},
+			{ProcessID: 4, Role: "semantic_validator", CurrentValue: 0, RecentIncrement: 0, LastUpdated: stats.SnapshotTime},
+		}
+		return stats, nil
 	}
 
 	// Parse miner VLC
