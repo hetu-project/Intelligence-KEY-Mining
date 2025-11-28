@@ -1063,9 +1063,12 @@ func (pq *PoCWQueryService) GetVLCStats(ctx context.Context) (*VLCStats, error) 
 
 	// If only miner VLC is NULL, initialize it with 0
 	if !currentMinerVLCJSON.Valid {
+		log.Printf("🔍 Miner VLC is NULL, initializing with default value")
 		stats.Miners = []VLCNodeStats{
 			{ProcessID: 1, Role: "miner", CurrentValue: 0, RecentIncrement: 0, LastUpdated: stats.SnapshotTime},
 		}
+	} else {
+		log.Printf("🔍 Miner VLC is valid: %s", currentMinerVLCJSON.String)
 	}
 
 	// Parse previous VLC values for increment calculation
