@@ -1649,10 +1649,10 @@ type PointsOverride struct {
 	UpdatedAt      time.Time `json:"updated_at" db:"updated_at"`
 }
 
-// GetUserSubnetTotalPoints calculates user's total points in a subnet (considering override)
-// GetUserSubnetTotalPoints 计算用户在 subnet 的总积分（包含调整）
+// GetUserSubnetTotalPoints calculates user's total points in a subnet (incremental + adjustments, no override)
+// GetUserSubnetTotalPoints 计算用户在 subnet 的总积分（累加积分 + 调整，不含覆盖）
 func (ss *StatsService) GetUserSubnetTotalPoints(ctx context.Context, subnetID, walletAddress string) (int, error) {
-	// 计算历史任务积分
+	// 计算历史任务积分（无覆盖逻辑）
 	var taskPoints int
 	err := ss.db.QueryRowContext(ctx, `
 		SELECT COALESCE(SUM(points), 0) FROM (
