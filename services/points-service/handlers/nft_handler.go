@@ -358,6 +358,7 @@ func (nh *NFTHandler) RegisterRoutes(router *gin.RouterGroup) {
 		points.POST("/twitter-follow-reward", nh.HandleTwitterFollowReward)
 		points.POST("/chat-task-reward", nh.HandleChatTaskReward)              // NEW: Chat task reward
 		points.POST("/register-qr-code-reward", nh.HandleRegisterQRCodeReward) // NEW: Register QR code task
+		points.POST("/telegram-vote-spend", nh.HandleTelegramVoteSpend)        // NEW: Telegram vote spend (create/participate)
 
 		// User completed tasks query
 		points.GET("/completed-tasks/:wallet", nh.GetUserCompletedTasks)
@@ -870,4 +871,38 @@ func (nh *NFTHandler) HandleRegisterQRCodeReward(c *gin.Context) {
 		AlreadyDone: false,
 		Message:     "Register QR code task completed successfully",
 	})
+}
+
+// HandleTelegramVoteSpend handles spending points for Telegram vote actions
+// POST /api/v1/points/telegram-vote-spend
+func (nh *NFTHandler) HandleTelegramVoteSpend(c *gin.Context) {
+	var req models.TelegramVoteSpendRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid request format: " + err.Error(),
+		})
+		return
+	}
+
+	// Basic validation
+	if req.UserWallet == "" || req.SubnetID == "" || req.VoteID == "" || req.Action == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "user_wallet, subnet_id, vote_id, and action are required",
+		})
+		return
+	}
+
+	// Execute spend
+	resp, err := nh.pointsService.SpendPointsForVote(c.Request.Context(), &req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
 }

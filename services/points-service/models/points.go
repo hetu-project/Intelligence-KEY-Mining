@@ -6,17 +6,19 @@ import (
 
 // Points source constants
 const (
-	PointsSourceTaskCreation      = "Task Creation"
-	PointsSourceTwitterRetweet    = "Twitter Retweet Task"
-	PointsSourceTwitterPost       = "Twitter Post Task"
-	PointsSourceTwitterFollow     = "Twitter Follow Task"
-	PointsSourceVLCDistribution   = "VLC Distribution"
-	PointsSourceNFTPurchase       = "NFT Purchase Bonus"
-	PointsSourceInvitationReward  = "Invitation Reward"
-	PointsSourceCreatorCommission = "Creator Commission"
-	PointsSourceTelegramTask      = "Telegram Task"
-	PointsSourceChatTask          = "Chat Task"
-	PointsSourceRegisterQRCode    = "Register QR Code Task"
+	PointsSourceTaskCreation            = "Task Creation"
+	PointsSourceTwitterRetweet          = "Twitter Retweet Task"
+	PointsSourceTwitterPost             = "Twitter Post Task"
+	PointsSourceTwitterFollow           = "Twitter Follow Task"
+	PointsSourceVLCDistribution         = "VLC Distribution"
+	PointsSourceNFTPurchase             = "NFT Purchase Bonus"
+	PointsSourceInvitationReward        = "Invitation Reward"
+	PointsSourceCreatorCommission       = "Creator Commission"
+	PointsSourceTelegramTask            = "Telegram Task"
+	PointsSourceChatTask                = "Chat Task"
+	PointsSourceRegisterQRCode          = "Register QR Code Task"
+	PointsSourceTelegramVoteCreate      = "Telegram Vote Create"
+	PointsSourceTelegramVoteParticipate = "Telegram Vote Participate"
 )
 
 // PointsDistributionRequest points distribution request
@@ -244,4 +246,26 @@ type RegisterQRCodeRewardResponse struct {
 	AlreadyDone  bool   `json:"already_done"` // Whether user already completed this task
 	Message      string `json:"message,omitempty"`
 	ErrorMessage string `json:"error_message,omitempty"`
+}
+
+// TelegramVoteSpendRequest represents a request to spend points for Telegram vote actions
+type TelegramVoteSpendRequest struct {
+	UserWallet string `json:"user_wallet" validate:"required"`
+	SubnetID   string `json:"subnet_id" validate:"required"`
+	VoteID     string `json:"vote_id" validate:"required"` // Unique vote/poll id
+	Action     string `json:"action" validate:"required"`  // "create" or "participate"
+	TaskID     string `json:"task_id,omitempty"`           // Optional task id for linkage
+}
+
+// TelegramVoteSpendResponse represents the response for Telegram vote spending
+type TelegramVoteSpendResponse struct {
+	Success        bool   `json:"success"`
+	UserWallet     string `json:"user_wallet"`
+	SubnetID       string `json:"subnet_id"`
+	VoteID         string `json:"vote_id"`
+	Action         string `json:"action"`
+	PointsDeducted int    `json:"points_deducted"` // Positive number representing cost
+	NewTotal       int    `json:"new_total"`       // New subnet total (net points)
+	Message        string `json:"message,omitempty"`
+	ErrorMessage   string `json:"error_message,omitempty"`
 }

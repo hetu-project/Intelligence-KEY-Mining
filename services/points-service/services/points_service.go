@@ -178,6 +178,10 @@ func (ps *PointsService) GetUserCompletedTasks(ctx context.Context, userWallet, 
 			task.TaskType = "chat"
 		case models.PointsSourceRegisterQRCode:
 			task.TaskType = "register_qr_code"
+		case models.PointsSourceTelegramVoteCreate:
+			task.TaskType = "telegram_vote_create"
+		case models.PointsSourceTelegramVoteParticipate:
+			task.TaskType = "telegram_vote_participate"
 		default:
 			task.TaskType = "unknown"
 		}
@@ -508,7 +512,7 @@ func (ps *PointsService) GetUserSubnetTotalPoints(ctx context.Context, subnetID,
 				)
 				WHERE ph.wallet_address = ?
 					AND t.subnet_id = ?
-					AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task', 'Telegram Vote Create', 'Telegram Vote Participate')
 			) AS all_points
 		`, walletAddress, subnetID, walletAddress, subnetID).Scan(&totalPoints)
 		if err != nil {
@@ -543,7 +547,7 @@ func (ps *PointsService) GetUserSubnetTotalPoints(ctx context.Context, subnetID,
 			)
 			WHERE ph.wallet_address = ?
 				AND t.subnet_id = ?
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task')
+			AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task', 'Telegram Vote Create', 'Telegram Vote Participate')
 				AND ph.created_at > ?
 		) AS points_after_override
 	`, walletAddress, subnetID, overrideTime.Time, walletAddress, subnetID, overrideTime.Time).Scan(&pointsAfterOverride)
@@ -920,7 +924,74 @@ func mapSourceToSimpleName(source string) string {
 		return "invitation"
 	case models.PointsSourceNFTPurchase:
 		return "nft_purchase"
+	case models.PointsSourceTelegramVoteCreate, models.PointsSourceTelegramVoteParticipate:
+		return "telegram_vote"
 	default:
 		return "other"
 	}
+}
+
+// SpendPointsForVote handles spending points for Telegram vote actions (create/participate)
+func (ps *PointsService) SpendPointsForVote(ctx context.Context, req *models.TelegramVoteSpendRequest) (*models.TelegramVoteSpendResponse, error) {
+	action := strings.ToLower(req.Action)
+
+	var cost int
+	var source string
+	switch action {
+	case "create":
+		cost = 5
+		source = models.PointsSourceTelegramVoteCreate
+	case "participate":
+		cost = 1
+		source = models.PointsSourceTelegramVoteParticipate
+	default:
+		return nil, fmt.Errorf("unsupported action: %s (must be 'create' or 'participate')", req.Action)
+	}
+
+	// Ensure user profile exists
+	if err := ps.ensureUserExists(ctx, req.UserWallet); err != nil {
+		return nil, fmt.Errorf("failed to ensure user exists: %v", err)
+	}
+
+	// Balance check (subnet level)
+	currentBalance, err := ps.GetUserSubnetTotalPoints(ctx, req.SubnetID, req.UserWallet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current balance: %v", err)
+	}
+	if currentBalance < cost {
+		return nil, fmt.Errorf("insufficient points: need %d, available %d", cost, currentBalance)
+	}
+
+	// Insert negative points record
+	today := time.Now().Format("2006-01-02")
+	record := &models.PointsRecord{
+		WalletAddress: req.UserWallet,
+		Date:          today,
+		Source:        source,
+		Points:        -cost,
+		TxRef:         req.VoteID,
+		SubnetID:      req.SubnetID,
+		CreatedAt:     time.Now(),
+	}
+
+	if err := ps.addPointsRecord(ctx, record); err != nil {
+		return nil, fmt.Errorf("failed to record spend: %v", err)
+	}
+
+	// Get new balance
+	newBalance, err := ps.GetUserSubnetTotalPoints(ctx, req.SubnetID, req.UserWallet)
+	if err != nil {
+		newBalance = currentBalance - cost
+	}
+
+	return &models.TelegramVoteSpendResponse{
+		Success:        true,
+		UserWallet:     req.UserWallet,
+		SubnetID:       req.SubnetID,
+		VoteID:         req.VoteID,
+		Action:         action,
+		PointsDeducted: cost,
+		NewTotal:       newBalance,
+		Message:        "Telegram vote spend recorded",
+	}, nil
 }
