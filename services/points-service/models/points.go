@@ -129,7 +129,7 @@ type TelegramTaskRewardRequest struct {
 	UserWallet string `json:"user_wallet" validate:"required"`
 	TaskID     string `json:"task_id" validate:"required"`
 	TelegramID string `json:"telegram_id" validate:"required"`
-	SubnetID   string `json:"subnet_id" validate:"required"`
+	SubnetID   string `json:"subnet_id,omitempty"`                 // Optional: if provided, spend is scoped to subnet
 }
 
 // TelegramTaskRewardResponse represents a Telegram task reward response

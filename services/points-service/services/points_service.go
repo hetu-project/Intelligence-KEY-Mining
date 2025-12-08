@@ -937,6 +937,7 @@ func (ps *PointsService) SpendPointsForVote(ctx context.Context, req *models.Tel
 
 	var cost int
 	var source string
+	var err error
 	switch action {
 	case "create":
 		cost = 5
@@ -953,10 +954,18 @@ func (ps *PointsService) SpendPointsForVote(ctx context.Context, req *models.Tel
 		return nil, fmt.Errorf("failed to ensure user exists: %v", err)
 	}
 
-	// Balance check (subnet level)
-	currentBalance, err := ps.GetUserSubnetTotalPoints(ctx, req.SubnetID, req.UserWallet)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get current balance: %v", err)
+	// Balance check: subnet-scoped if subnet_id provided, otherwise global total_points
+	var currentBalance int
+	if strings.TrimSpace(req.SubnetID) != "" {
+		currentBalance, err = ps.GetUserSubnetTotalPoints(ctx, req.SubnetID, req.UserWallet)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get current subnet balance: %v", err)
+		}
+	} else {
+		currentBalance, err = ps.GetUserPoints(ctx, req.UserWallet)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get user total points: %v", err)
+		}
 	}
 	if currentBalance < cost {
 		return nil, fmt.Errorf("insufficient points: need %d, available %d", cost, currentBalance)
@@ -970,7 +979,7 @@ func (ps *PointsService) SpendPointsForVote(ctx context.Context, req *models.Tel
 		Source:        source,
 		Points:        -cost,
 		TxRef:         req.VoteID,
-		SubnetID:      req.SubnetID,
+		SubnetID:      strings.TrimSpace(req.SubnetID),
 		CreatedAt:     time.Now(),
 	}
 
@@ -979,15 +988,23 @@ func (ps *PointsService) SpendPointsForVote(ctx context.Context, req *models.Tel
 	}
 
 	// Get new balance
-	newBalance, err := ps.GetUserSubnetTotalPoints(ctx, req.SubnetID, req.UserWallet)
-	if err != nil {
-		newBalance = currentBalance - cost
+	var newBalance int
+	if strings.TrimSpace(req.SubnetID) != "" {
+		newBalance, err = ps.GetUserSubnetTotalPoints(ctx, req.SubnetID, req.UserWallet)
+		if err != nil {
+			newBalance = currentBalance - cost
+		}
+	} else {
+		newBalance, err = ps.GetUserPoints(ctx, req.UserWallet)
+		if err != nil {
+			newBalance = currentBalance - cost
+		}
 	}
 
 	return &models.TelegramVoteSpendResponse{
 		Success:        true,
 		UserWallet:     req.UserWallet,
-		SubnetID:       req.SubnetID,
+		SubnetID:       strings.TrimSpace(req.SubnetID),
 		VoteID:         req.VoteID,
 		Action:         action,
 		PointsDeducted: cost,

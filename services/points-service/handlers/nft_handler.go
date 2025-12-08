@@ -885,11 +885,11 @@ func (nh *NFTHandler) HandleTelegramVoteSpend(c *gin.Context) {
 		return
 	}
 
-	// Basic validation
-	if req.UserWallet == "" || req.SubnetID == "" || req.VoteID == "" || req.Action == "" {
+	// Basic validation (subnet_id optional)
+	if req.UserWallet == "" || req.VoteID == "" || req.Action == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"error":   "user_wallet, subnet_id, vote_id, and action are required",
+			"error":   "user_wallet, vote_id, and action are required",
 		})
 		return
 	}
