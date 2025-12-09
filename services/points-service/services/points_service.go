@@ -474,7 +474,8 @@ func (ps *PointsService) GetTaskRewardBadge(ctx context.Context, taskID string) 
 
 // GetUserSubnetTotalPoints calculates user's total points in a subnet (incremental only, no override table)
 func (ps *PointsService) GetUserSubnetTotalPoints(ctx context.Context, subnetID, walletAddress string) (int, error) {
-	var totalPoints int
+	// 计算历史任务积分
+	var taskPoints int
 	err := ps.db.QueryRowContext(ctx, `
 		SELECT COALESCE(SUM(points), 0) FROM (
 			-- Chat Task: direct subnet_id
@@ -494,17 +495,31 @@ func (ps *PointsService) GetUserSubnetTotalPoints(ctx context.Context, subnetID,
 					WHEN ph.tx_ref LIKE 'pocw-consensus-%' 
 					THEN SUBSTRING(ph.tx_ref, 16)
 					ELSE ph.tx_ref
-				END = t.id
+				END = t.id COLLATE utf8mb4_unicode_ci
 			)
 			WHERE ph.wallet_address = ?
 				AND t.subnet_id = ?
-				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task', 'Telegram Vote Create', 'Telegram Vote Participate')
+				AND ph.source IN ('VLC Distribution', 'Twitter Post Task', 'Telegram Task', 'Twitter Follow Task', 'Register QR Code Task', 'Telegram Vote Create', 'Telegram Vote Participate')
 		) AS all_points
-	`, walletAddress, subnetID, walletAddress, subnetID).Scan(&totalPoints)
+	`, walletAddress, subnetID, walletAddress, subnetID).Scan(&taskPoints)
 	if err != nil {
 		return 0, fmt.Errorf("failed to sum subnet points: %v", err)
 	}
-	return totalPoints, nil
+
+	// 计算所有调整积分（增量累加）
+	var adjustmentPoints int
+	err = ps.db.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(adjustment_points), 0)
+		FROM subnet_points_adjustment
+		WHERE subnet_id = ?
+			AND wallet_address = ?
+	`, subnetID, walletAddress).Scan(&adjustmentPoints)
+	if err != nil {
+		// If adjustment table doesn't exist or query fails, just use task points
+		adjustmentPoints = 0
+	}
+
+	return taskPoints + adjustmentPoints, nil
 }
 
 // GetPointsHistory gets user points history
@@ -905,20 +920,29 @@ func (ps *PointsService) SpendPointsForVote(ctx context.Context, req *models.Tel
 	}
 
 	// Balance check: subnet-scoped if subnet_id provided, otherwise global total_points
+	// Strict mode: if subnet_id provided, must have sufficient subnet balance
 	var currentBalance int
+	var useSubnetBalance bool
 	if strings.TrimSpace(req.SubnetID) != "" {
+		// Strict: must use subnet balance, no fallback to global
 		currentBalance, err = ps.GetUserSubnetTotalPoints(ctx, req.SubnetID, req.UserWallet)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get current subnet balance: %v", err)
+			return nil, fmt.Errorf("failed to get subnet balance: %v", err)
+		}
+		useSubnetBalance = true
+		if currentBalance < cost {
+			return nil, fmt.Errorf("insufficient subnet points: need %d, subnet '%s' available %d", cost, req.SubnetID, currentBalance)
 		}
 	} else {
+		// No subnet_id: use global total points
 		currentBalance, err = ps.GetUserPoints(ctx, req.UserWallet)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get user total points: %v", err)
 		}
-	}
-	if currentBalance < cost {
-		return nil, fmt.Errorf("insufficient points: need %d, available %d", cost, currentBalance)
+		useSubnetBalance = false
+		if currentBalance < cost {
+			return nil, fmt.Errorf("insufficient points: need %d, available %d", cost, currentBalance)
+		}
 	}
 
 	// Insert negative points record
@@ -937,9 +961,9 @@ func (ps *PointsService) SpendPointsForVote(ctx context.Context, req *models.Tel
 		return nil, fmt.Errorf("failed to record spend: %v", err)
 	}
 
-	// Get new balance
+	// Get new balance (use same source as balance check)
 	var newBalance int
-	if strings.TrimSpace(req.SubnetID) != "" {
+	if useSubnetBalance && strings.TrimSpace(req.SubnetID) != "" {
 		newBalance, err = ps.GetUserSubnetTotalPoints(ctx, req.SubnetID, req.UserWallet)
 		if err != nil {
 			newBalance = currentBalance - cost
