@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"log"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
@@ -38,6 +39,11 @@ func main() {
 	statsHandler := handlers.NewStatsHandler(pointsService, statsService)
 	nftHandler := handlers.NewNFTHandler(pointsService, nftService)
 	adminHandler := handlers.NewAdminHandler(statsService) // New admin handler for points adjustment
+
+	// Start background refresher for subnet statistics cache.
+	// This periodically runs the heavy GetSubnetStats query and stores
+	// results into subnet_stats_cache for the lightweight /subnetsnew endpoint.
+	services.StartSubnetStatsCacheRefresher(statsService, 10*time.Minute)
 
 	// Initialize Gin router
 	router := gin.Default()

@@ -92,6 +92,40 @@ func (sh *StatsHandler) GetSubnetStats(c *gin.Context) {
 	})
 }
 
+// GetSubnetStatsCached gets subnet statistics from the cache table
+// and exposes them via a lightweight HTTP endpoint.
+// Route: GET /api/v1/stats/subnetsnew
+func (sh *StatsHandler) GetSubnetStatsCached(c *gin.Context) {
+	subnets, err := sh.statsService.GetSubnetStatsCached(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to get cached subnet stats: " + err.Error(),
+		})
+		return
+	}
+
+	// Calculate summary
+	totalSubnets := len(subnets)
+	totalSubnetPoints := 0
+	totalSubnetUsers := 0
+
+	for _, subnet := range subnets {
+		totalSubnetPoints += subnet.TotalPointsDistributed
+		totalSubnetUsers += subnet.UniqueUsers
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"total_subnets":       totalSubnets,
+			"total_subnet_points": totalSubnetPoints,
+			"total_subnet_users":  totalSubnetUsers,
+			"subnets":             subnets,
+		},
+	})
+}
+
 // GetSubnetDetails gets detailed statistics for a specific subnet
 func (sh *StatsHandler) GetSubnetDetails(c *gin.Context) {
 	subnetID := c.Param("subnet_id")
@@ -660,6 +694,8 @@ func (sh *StatsHandler) RegisterRoutes(router *gin.RouterGroup) {
 
 		// Subnet statistics
 		stats.GET("/subnets", sh.GetSubnetStats)
+		// Cached version of subnet stats for faster frontend display
+		stats.GET("/subnetsnew", sh.GetSubnetStatsCached)
 		stats.GET("/subnets/daily-points", sh.GetSubnetsDailyPoints) // NEW: Subnet daily points over N days
 		stats.GET("/subnets/:subnet_id", sh.GetSubnetDetails)
 		stats.GET("/subnets/:subnet_id/points-today", sh.GetSubnetPointsToday)

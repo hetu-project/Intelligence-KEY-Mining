@@ -33,6 +33,96 @@ type SubnetStats struct {
 	TodayActiveUsers       int    `json:"today_active_users" db:"today_active_users"`
 }
 
+// StartSubnetStatsCacheRefresher starts a background goroutine that periodically
+// refreshes the subnet_stats_cache table using the heavy GetSubnetStats query.
+// This allows a lightweight HTTP endpoint to serve cached results quickly.
+func StartSubnetStatsCacheRefresher(ss *StatsService, interval time.Duration) {
+	// Run in background; caller is responsible for process lifetime.
+	go func() {
+		// Initial warm-up refresh
+		ctx, cancel := context.WithTimeout(context.Background(), interval)
+		if err := ss.RefreshSubnetStatsCache(ctx); err != nil {
+			// Log to stdout; points-service already logs DB connectivity on start.
+			fmt.Printf("WARN: initial RefreshSubnetStatsCache failed: %v\n", err)
+		}
+		cancel()
+
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			ctx, cancel := context.WithTimeout(context.Background(), interval)
+			if err := ss.RefreshSubnetStatsCache(ctx); err != nil {
+				fmt.Printf("WARN: periodic RefreshSubnetStatsCache failed: %v\n", err)
+			}
+			cancel()
+		}
+	}()
+}
+
+// RefreshSubnetStatsCache recomputes subnet statistics using the existing
+// GetSubnetStats logic and stores the result into subnet_stats_cache.
+func (ss *StatsService) RefreshSubnetStatsCache(ctx context.Context) error {
+	stats, err := ss.GetSubnetStats(ctx)
+	if err != nil {
+		return fmt.Errorf("RefreshSubnetStatsCache: failed to get subnet stats: %w", err)
+	}
+
+	tx, err := ss.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("RefreshSubnetStatsCache: failed to begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, "TRUNCATE TABLE subnet_stats_cache"); err != nil {
+		return fmt.Errorf("RefreshSubnetStatsCache: failed to truncate cache table: %w", err)
+	}
+
+	stmt, err := tx.PrepareContext(ctx, `
+		REPLACE INTO subnet_stats_cache (
+			subnet_id,
+			subnet_name,
+			subnet_icon,
+			creator_wallet,
+			total_tasks,
+			completed_tasks,
+			unique_users,
+			total_points_distributed,
+			today_points_distributed,
+			today_active_users,
+			updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+	`)
+	if err != nil {
+		return fmt.Errorf("RefreshSubnetStatsCache: failed to prepare insert: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, s := range stats {
+		if _, err := stmt.ExecContext(
+			ctx,
+			s.SubnetID,
+			s.SubnetName,
+			s.SubnetIcon,
+			s.CreatorWallet,
+			s.TotalTasks,
+			s.CompletedTasks,
+			s.UniqueUsers,
+			s.TotalPointsDistributed,
+			s.TodayPointsDistributed,
+			s.TodayActiveUsers,
+		); err != nil {
+			return fmt.Errorf("RefreshSubnetStatsCache: failed to insert row for subnet %s: %w", s.SubnetID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("RefreshSubnetStatsCache: failed to commit tx: %w", err)
+	}
+
+	return nil
+}
+
 // UserRanking represents user points ranking
 type UserRanking struct {
 	Ranking             int    `json:"ranking" db:"ranking"`
@@ -328,6 +418,58 @@ func (ss *StatsService) GetSubnetStats(ctx context.Context) ([]*SubnetStats, err
 		}
 
 		stats = append(stats, &stat)
+	}
+
+	return stats, nil
+}
+
+// GetSubnetStatsCached reads subnet statistics from the subnet_stats_cache table.
+// This is a lightweight alternative to GetSubnetStats for HTTP handlers.
+func (ss *StatsService) GetSubnetStatsCached(ctx context.Context) ([]*SubnetStats, error) {
+	query := `
+		SELECT
+			subnet_id,
+			subnet_name,
+			subnet_icon,
+			creator_wallet,
+			total_tasks,
+			completed_tasks,
+			unique_users,
+			total_points_distributed,
+			today_points_distributed,
+			today_active_users
+		FROM subnet_stats_cache
+		ORDER BY total_points_distributed DESC
+	`
+
+	rows, err := ss.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query subnet stats cache: %v", err)
+	}
+	defer rows.Close()
+
+	var stats []*SubnetStats
+	for rows.Next() {
+		var stat SubnetStats
+		if err := rows.Scan(
+			&stat.SubnetID,
+			&stat.SubnetName,
+			&stat.SubnetIcon,
+			&stat.CreatorWallet,
+			&stat.TotalTasks,
+			&stat.CompletedTasks,
+			&stat.UniqueUsers,
+			&stat.TotalPointsDistributed,
+			&stat.TodayPointsDistributed,
+			&stat.TodayActiveUsers,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan subnet stats cache: %v", err)
+		}
+		stats = append(stats, &stat)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate subnet stats cache rows: %v", err)
 	}
 
 	return stats, nil
